@@ -1,0 +1,8 @@
+boto3
+onepasswordconnectsdk
+pathtools
+python-dateutil
+pytz
+sentry-sdk
+simplejson
+spotipy
