@@ -1,7 +1,10 @@
+import argparse
 import logging.handlers
 import os
 import os.path
 import sys
+
+import simplejson as json
 
 from boto3 import Session
 from botocore.session import Session as BotoCoreSession
@@ -18,6 +21,7 @@ from onepasswordconnectsdk.client import (
 import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from spotipy.oauth2 import SpotifyClientCredentials
+from spotipy.exceptions import SpotifyException
 
 
 APP_NAME = Path(__file__).stem
@@ -29,7 +33,7 @@ log = logging.getLogger(APP_NAME)
 log.propagate = False
 formatter = logging.Formatter('%(name)s %(threadName)s [%(levelname)s] %(message)s')
 if sys.stdout.isatty():
-    stream_handler = logging.StreamHandler(stream=sys.stdout)
+    stream_handler = logging.StreamHandler(stream=sys.stderr)
     stream_handler.setFormatter(formatter)
     log.addHandler(stream_handler)
 
@@ -101,10 +105,40 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=creds.spotify_client_id
 
 log.info(f'Library init complete.')
 
+parser = argparse.ArgumentParser(description='Fetch Spotify content.')
+parser.add_argument('-l', '--likes', action='store_true', help='Liked content')
 
 if __name__ == "__main__":
     log.info('Spotify backup tool starting...')
-    results = sp.current_user_saved_tracks()
-    for idx, item in enumerate(results['items']):
-        track = item['track']
-        print(idx, track['artists'][0]['name'], " – ", track['name'])
+    args = parser.parse_args()
+    if args.likes:
+        log.info('Fetching Spotify Likes...')
+        tracks = list()
+
+        offset = 0
+        fetched = 0
+        page_size = 0
+        fetch_limit = 20
+        while True:
+            results = None
+            try:
+                results = sp.current_user_saved_tracks(limit=fetch_limit, offset=offset)
+            except SpotifyException:
+                log.exception(f'Fetch error on offset {offset}.')
+                sys.exit(1)
+            items = results['items']
+            page_size = len(items)
+            fetched += page_size
+            log.info(f'Fetched {fetched} results...')
+            for idx, item in enumerate(items):
+                offset += 1
+                #track = item['track']
+                #print(idx, track['artists'][0]['name'], " – ", track['name'])
+                tracks.append(item['track'])
+            if page_size < fetch_limit:
+                break
+
+        try:
+            print(json.dumps(tracks))
+        except TypeError:
+            log.exception(f'Cannot JSON dump {str(tracks)}')
