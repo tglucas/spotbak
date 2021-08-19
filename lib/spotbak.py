@@ -6,8 +6,11 @@ import sys
 
 import simplejson as json
 
+import boto3
 from boto3 import Session
+from boto3.dynamodb.conditions import Key, Attr
 from botocore.session import Session as BotoCoreSession
+
 
 import onepasswordconnectsdk
 import sentry_sdk
@@ -93,6 +96,10 @@ boto3_session = Session(
     region_name=AWS_REGION,
     botocore_session=boto_session)
 
+boto3_ddb = boto3.resource('dynamodb')
+DDB_TABLE_NAME = 'spotbak_tracks'
+ddb_table = boto3_ddb.Table(DDB_TABLE_NAME)
+
 
 os.environ['SPOTIPY_CLIENT_ID'] = creds.spotify_client_id
 os.environ['SPOTIPY_CLIENT_SECRET'] = creds.spotify_client_secret
@@ -106,15 +113,16 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=creds.spotify_client_id
 log.info(f'Library init complete.')
 
 parser = argparse.ArgumentParser(description='Fetch Spotify content.')
+parser.add_argument('-d', '--ddb', action='store_true', help=f"Store result in DynamoDB table '{DDB_TABLE_NAME}'")
+parser.add_argument('-j', '--json', action='store_true', help='Print JSON output')
 parser.add_argument('-l', '--likes', action='store_true', help='Liked content')
 
 if __name__ == "__main__":
     log.info('Spotify backup tool starting...')
     args = parser.parse_args()
+    tracks = list()
     if args.likes:
         log.info('Fetching Spotify Likes...')
-        tracks = list()
-
         offset = 0
         fetched = 0
         page_size = 0
@@ -132,13 +140,34 @@ if __name__ == "__main__":
             log.info(f'Fetched {fetched} results...')
             for idx, item in enumerate(items):
                 offset += 1
-                #track = item['track']
-                #print(idx, track['artists'][0]['name'], " – ", track['name'])
                 tracks.append(item['track'])
             if page_size < fetch_limit:
                 break
-
-        try:
-            print(json.dumps(tracks))
-        except TypeError:
-            log.exception(f'Cannot JSON dump {str(tracks)}')
+    if args.ddb:
+        ddb_count = ddb_table.item_count
+        track_count = len(tracks)
+        log.info(f"DynamoDB table '{DDB_TABLE_NAME}' contains {ddb_count} items.")
+        if ddb_count > 0:
+            log.warning('Not updating existing DynamoDB table data.')
+        elif track_count > 0:
+            with ddb_table.batch_writer() as batch:
+                for track in tracks:
+                    batch.put_item(
+                        Item={
+                            'artist': track['artists'][0]['name'],
+                            'track_name': track['name'],
+                            'info': track,
+                        },
+                    )
+            log.info(f"Added {track_count} items to DynamoDB table '{DDB_TABLE_NAME}'.")
+        else:
+            log.warning('No items to add to DynamoDB.')
+    if args.json:
+        if len(tracks) > 0:
+            try:
+                print(json.dumps(tracks))
+            except TypeError:
+                log.exception(f'Cannot JSON dump {str(tracks)}')
+        else:
+            log.warning('No items for JSON.')
+    log.info('Goodbye.')
