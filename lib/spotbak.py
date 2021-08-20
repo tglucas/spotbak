@@ -107,7 +107,11 @@ auth_manager = SpotifyClientCredentials()
 sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=creds.spotify_client_id,
                                                client_secret=creds.spotify_client_secret,
                                                redirect_uri=creds.spotify_client_uri,
-                                               scope="user-library-read"))
+                                               scope=[
+                                                   "user-library-read",
+                                                   "playlist-read-private",
+                                                   "user-top-read",
+                                                   "user-follow-read"]))
 
 
 log.info(f'Library init complete.')
@@ -115,43 +119,134 @@ log.info(f'Library init complete.')
 parser = argparse.ArgumentParser(description='Fetch Spotify content.')
 parser.add_argument('-d', '--ddb', action='store_true', help=f"Store result in DynamoDB table '{DDB_TABLE_NAME}'")
 parser.add_argument('-j', '--json', action='store_true', help='Print JSON output')
-parser.add_argument('-l', '--likes', action='store_true', help='Liked content')
+parser.add_argument('-a', '--artists', action='store_true', help='Fetch followed artists from Spotify')
+parser.add_argument('-b', '--albums', action='store_true', help='Fetch saved albums from Spotify')
+parser.add_argument('-t', '--tracks', action='store_true', help='Fetch saved tracks from Spotify')
+parser.add_argument('-p', '--playlists', action='store_true', help='Fetch saved playlists from Spotify')
+parser.add_argument('-e', '--episodes', action='store_true', help='Fetch saved episodes from Spotify')
+parser.add_argument('-s', '--shows', action='store_true', help='Fetch saved shows from Spotify')
+parser.add_argument('-x', '--top-artists', action='store_true', help='Fetch top artists from Spotify')
+parser.add_argument('-y', '--top-tracks', action='store_true', help='Fetch top tracks from Spotify')
+
+
+
+def paginate(method_name, item_name):
+    return_items = list()
+    log.info(f'Fetching {item_name} from Spotify...')
+    offset = 0
+    fetched = 0
+    page_size = 0
+    fetch_limit = 20
+    while True:
+        results = None
+        try:
+            results = getattr(sp, method_name)(limit=fetch_limit, offset=offset)
+        except SpotifyException:
+            log.exception(f'Fetch error on offset {offset}.')
+            sys.exit(1)
+        fetched_items = results['items']
+        page_size = len(fetched_items)
+        fetched += page_size
+        log.info(f'Fetched {fetched} results...')
+        for idx, item in enumerate(fetched_items):
+            offset += 1
+            return_items.append(item)
+        if page_size < fetch_limit:
+            break
+    return return_items
+
 
 if __name__ == "__main__":
     log.info('Spotify backup tool starting...')
     args = parser.parse_args()
-    tracks = list()
-    if args.likes:
-        log.info('Fetching Spotify Likes...')
-        offset = 0
+    items = None
+    tracks = None
+    artists = None
+    albums = None
+    episodes = None
+    shows = None
+    playlists = None
+    if args.playlists:
+        playlists = list()
+        user_id = sp.me()['id']
+        fetched_playlists = paginate(method_name='current_user_playlists', item_name='playlists')
+        for fetched_playlist in fetched_playlists:
+            if fetched_playlist['owner']['id'] == user_id:
+                log.info(f'Collecting playlist data for user {user_id}...')
+                playlist_id = fetched_playlist['id']
+                log.info(f'Fetching tracks for playlist {playlist_id}...')
+                playlist_items = list()
+                offset = 0
+                fetched = 0
+                page_size = 0
+                fetch_limit = 20
+                while True:
+                    results = None
+                    try:
+                        #FIXME: support paginate
+                        results = sp.playlist_items(playlist_id=playlist_id, limit=fetch_limit, offset=offset)
+                    except SpotifyException:
+                        log.exception(f'Fetch error on offset {offset}.')
+                        sys.exit(1)
+                    fetched_items = results['items']
+                    page_size = len(fetched_items)
+                    fetched += page_size
+                    log.info(f'Fetched {fetched} results...')
+                    for idx, item in enumerate(fetched_items):
+                        offset += 1
+                        playlist_items.append(item)
+                    if page_size < fetch_limit:
+                        break
+                log.info(f'Fetched {len(playlist_items)} tracks for playlist {playlist_id}.')
+                fetched_playlist['tracks'] = playlist_items
+                playlists.append(fetched_playlist)
+        log.info(f'Fetched {len(playlists)} in total.')
+        items = playlists
+    if args.tracks:
+        items = tracks = paginate(method_name='current_user_saved_tracks', item_name='saved tracks')
+    if args.artists:
+        items = list()
+        log.info(f'Fetching followed artists from Spotify...')
+        last_id = None
         fetched = 0
         page_size = 0
         fetch_limit = 20
         while True:
             results = None
             try:
-                results = sp.current_user_saved_tracks(limit=fetch_limit, offset=offset)
+                results = sp.current_user_followed_artists(limit=fetch_limit, after=last_id)
             except SpotifyException:
-                log.exception(f'Fetch error on offset {offset}.')
+                log.exception(f'Fetch error.')
                 sys.exit(1)
-            items = results['items']
-            page_size = len(items)
+            fetched_items = results['artists']
+            page_size = len(fetched_items)
             fetched += page_size
             log.info(f'Fetched {fetched} results...')
-            for idx, item in enumerate(items):
-                offset += 1
-                tracks.append(item['track'])
+            for idx, item in enumerate(fetched_items['items']):
+                items.append(item)
+            last_id = fetched_items['cursors']['after']
             if page_size < fetch_limit:
                 break
-    if args.ddb:
+    if args.albums:
+        items = albums = paginate(method_name='current_user_saved_albums', item_name='saved albums')
+    if args.episodes:
+        items = episodes = paginate(method_name='current_user_saved_episodes', item_name='saved episodes')
+    if args.shows:
+        items = shows = paginate(method_name='current_user_saved_shows', item_name='saved shows')
+    if args.top_artists:
+        items = artists = paginate(method_name='current_user_top_artists', item_name='top artists')
+    if args.top_tracks:
+        items = tracks = paginate(method_name='current_user_top_tracks', item_name='top tracks')
+    if args.ddb and tracks:
         ddb_count = ddb_table.item_count
         track_count = len(tracks)
         log.info(f"DynamoDB table '{DDB_TABLE_NAME}' contains {ddb_count} items.")
         if ddb_count > 0:
             log.warning('Not updating existing DynamoDB table data.')
         elif track_count > 0:
-            with ddb_table.batch_writer() as batch:
+            with ddb_table.batch_writer(overwrite_by_pkeys=['artist', 'track_name']) as batch:
                 for track in tracks:
+                    track = track['track']
                     batch.put_item(
                         Item={
                             'artist': track['artists'][0]['name'],
@@ -162,12 +257,14 @@ if __name__ == "__main__":
             log.info(f"Added {track_count} items to DynamoDB table '{DDB_TABLE_NAME}'.")
         else:
             log.warning('No items to add to DynamoDB.')
-    if args.json:
-        if len(tracks) > 0:
+    if args.json and items:
+        if len(items) > 0:
             try:
-                print(json.dumps(tracks))
+                print(json.dumps(items))
             except TypeError:
-                log.exception(f'Cannot JSON dump {str(tracks)}')
+                log.exception(f'Cannot JSON dump {str(items)}')
         else:
             log.warning('No items for JSON.')
+    if not items or (items and len(items) == 0):
+        log.warning('Nothing fetched.')
     log.info('Goodbye.')
