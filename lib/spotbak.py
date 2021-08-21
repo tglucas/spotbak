@@ -41,6 +41,7 @@ fetch_group.add_argument('--shows', action='store_true')
 fetch_group.add_argument('--top-artists', action='store_true')
 fetch_group.add_argument('--top-tracks', action='store_true')
 fetch_group.add_argument('--tracks', action='store_true')
+parser.add_argument('--no-filter-my-playlists', action='store_true', default=False, help='Fetch all playlist information.')
 args = parser.parse_args()
 
 
@@ -185,7 +186,7 @@ if __name__ == "__main__":
         user_id = sp.me()['id']
         fetched_playlists = paginate(method_name='current_user_playlists', item_name='playlists')
         for fetched_playlist in fetched_playlists:
-            if fetched_playlist['owner']['id'] == user_id:
+            if fetched_playlist['owner']['id'] == user_id or args.no_filter_my_playlists:
                 log.info(f'Collecting playlist data for user {user_id}...')
                 playlist_id = fetched_playlist['id']
                 log.info(f'Fetching tracks for playlist {playlist_id}...')
