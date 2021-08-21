@@ -1,4 +1,5 @@
 import argparse
+from argparse import ArgumentParser
 import logging.handlers
 import os
 import os.path
@@ -25,6 +26,22 @@ import spotipy
 from spotipy.oauth2 import SpotifyOAuth
 from spotipy.oauth2 import SpotifyClientCredentials
 from spotipy.exceptions import SpotifyException
+
+
+parser: ArgumentParser = argparse.ArgumentParser(description='Fetch Spotify content.')
+output_group = parser.add_mutually_exclusive_group(required=True)
+output_group.add_argument('--ddb', action='store_true', help='Store result in DynamoDB')
+output_group.add_argument('--json', action='store_true', help='Print JSON output')
+fetch_group = parser.add_mutually_exclusive_group(required=True)
+fetch_group.add_argument('--albums', action='store_true')
+fetch_group.add_argument('--artists', action='store_true')
+fetch_group.add_argument('--episodes', action='store_true')
+fetch_group.add_argument('--playlists', action='store_true')
+fetch_group.add_argument('--shows', action='store_true')
+fetch_group.add_argument('--top-artists', action='store_true')
+fetch_group.add_argument('--top-tracks', action='store_true')
+fetch_group.add_argument('--tracks', action='store_true')
+args = parser.parse_args()
 
 
 APP_NAME = Path(__file__).stem
@@ -114,22 +131,6 @@ sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=creds.spotify_client_id
                                                    "user-follow-read"]))
 
 
-log.info(f'Library init complete.')
-
-parser = argparse.ArgumentParser(description='Fetch Spotify content.')
-parser.add_argument('-d', '--ddb', action='store_true', help=f"Store result in DynamoDB table '{DDB_TABLE_NAME}'")
-parser.add_argument('-j', '--json', action='store_true', help='Print JSON output')
-parser.add_argument('-a', '--artists', action='store_true', help='Fetch followed artists from Spotify')
-parser.add_argument('-b', '--albums', action='store_true', help='Fetch saved albums from Spotify')
-parser.add_argument('-t', '--tracks', action='store_true', help='Fetch saved tracks from Spotify')
-parser.add_argument('-p', '--playlists', action='store_true', help='Fetch saved playlists from Spotify')
-parser.add_argument('-e', '--episodes', action='store_true', help='Fetch saved episodes from Spotify')
-parser.add_argument('-s', '--shows', action='store_true', help='Fetch saved shows from Spotify')
-parser.add_argument('-x', '--top-artists', action='store_true', help='Fetch top artists from Spotify')
-parser.add_argument('-y', '--top-tracks', action='store_true', help='Fetch top tracks from Spotify')
-
-
-
 def paginate(method_name, item_name, use_cursor=False, item_key=None, **kwargs):
     return_items = list()
     log.info(f'Fetching {item_name} from Spotify...')
@@ -172,8 +173,6 @@ def paginate(method_name, item_name, use_cursor=False, item_key=None, **kwargs):
 
 
 if __name__ == "__main__":
-    log.info('Spotify backup tool starting...')
-    args = parser.parse_args()
     items = None
     tracks = None
     artists = None
