@@ -146,7 +146,8 @@ def paginate(method_name, item_name, use_cursor=False, item_key=None, **kwargs):
         try:
             paginate_args = {"limit": fetch_limit}
             if use_cursor:
-                paginate_args["after"] = last_id
+                if last_id:
+                    paginate_args["after"] = last_id
             else:
                 paginate_args["offset"] = offset
             call_args = {**kwargs, **paginate_args}
@@ -169,7 +170,9 @@ def paginate(method_name, item_name, use_cursor=False, item_key=None, **kwargs):
             return_items.append(item)
         if use_cursor:
             last_id = fetched_items['cursors']['after']
-        if page_size < fetch_limit:
+            if last_id is None:
+                break
+        elif page_size < fetch_limit:
             break
     return return_items
 
