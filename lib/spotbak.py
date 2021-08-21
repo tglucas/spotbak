@@ -130,27 +130,42 @@ parser.add_argument('-y', '--top-tracks', action='store_true', help='Fetch top t
 
 
 
-def paginate(method_name, item_name):
+def paginate(method_name, item_name, use_cursor=False, item_key=None, **kwargs):
     return_items = list()
     log.info(f'Fetching {item_name} from Spotify...')
     offset = 0
     fetched = 0
     page_size = 0
     fetch_limit = 20
+    last_id = None
     while True:
         results = None
         try:
-            results = getattr(sp, method_name)(limit=fetch_limit, offset=offset)
+            paginate_args = {"limit": fetch_limit}
+            if use_cursor:
+                paginate_args["after"] = last_id
+            else:
+                paginate_args["offset"] = offset
+            call_args = {**kwargs, **paginate_args}
+            results = getattr(sp, method_name)(**call_args)
         except SpotifyException:
             log.exception(f'Fetch error on offset {offset}.')
             sys.exit(1)
-        fetched_items = results['items']
+        if item_key:
+            fetched_items = results[item_key]
+        else:
+            fetched_items = results['items']
         page_size = len(fetched_items)
         fetched += page_size
         log.info(f'Fetched {fetched} results...')
-        for idx, item in enumerate(fetched_items):
+        iter_items = fetched_items
+        if item_key:
+            iter_items = fetched_items['items']
+        for idx, item in enumerate(iter_items):
             offset += 1
             return_items.append(item)
+        if use_cursor:
+            last_id = fetched_items['cursors']['after']
         if page_size < fetch_limit:
             break
     return return_items
@@ -175,28 +190,7 @@ if __name__ == "__main__":
                 log.info(f'Collecting playlist data for user {user_id}...')
                 playlist_id = fetched_playlist['id']
                 log.info(f'Fetching tracks for playlist {playlist_id}...')
-                playlist_items = list()
-                offset = 0
-                fetched = 0
-                page_size = 0
-                fetch_limit = 20
-                while True:
-                    results = None
-                    try:
-                        #FIXME: support paginate
-                        results = sp.playlist_items(playlist_id=playlist_id, limit=fetch_limit, offset=offset)
-                    except SpotifyException:
-                        log.exception(f'Fetch error on offset {offset}.')
-                        sys.exit(1)
-                    fetched_items = results['items']
-                    page_size = len(fetched_items)
-                    fetched += page_size
-                    log.info(f'Fetched {fetched} results...')
-                    for idx, item in enumerate(fetched_items):
-                        offset += 1
-                        playlist_items.append(item)
-                    if page_size < fetch_limit:
-                        break
+                playlist_items = paginate(method_name='playlist_items', item_name='playlist tracks', playlist_id=playlist_id)
                 log.info(f'Fetched {len(playlist_items)} tracks for playlist {playlist_id}.')
                 fetched_playlist['tracks'] = playlist_items
                 playlists.append(fetched_playlist)
@@ -205,28 +199,7 @@ if __name__ == "__main__":
     if args.tracks:
         items = tracks = paginate(method_name='current_user_saved_tracks', item_name='saved tracks')
     if args.artists:
-        items = list()
-        log.info(f'Fetching followed artists from Spotify...')
-        last_id = None
-        fetched = 0
-        page_size = 0
-        fetch_limit = 20
-        while True:
-            results = None
-            try:
-                results = sp.current_user_followed_artists(limit=fetch_limit, after=last_id)
-            except SpotifyException:
-                log.exception(f'Fetch error.')
-                sys.exit(1)
-            fetched_items = results['artists']
-            page_size = len(fetched_items)
-            fetched += page_size
-            log.info(f'Fetched {fetched} results...')
-            for idx, item in enumerate(fetched_items['items']):
-                items.append(item)
-            last_id = fetched_items['cursors']['after']
-            if page_size < fetch_limit:
-                break
+        items = artists = paginate(method_name='current_user_followed_artists', item_name='followed artists', use_cursor=True, item_key='artists')
     if args.albums:
         items = albums = paginate(method_name='current_user_saved_albums', item_name='saved albums')
     if args.episodes:
