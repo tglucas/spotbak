@@ -13,7 +13,6 @@ from boto3.dynamodb.conditions import Key, Attr
 from botocore.session import Session as BotoCoreSession
 from botocore.exceptions import ClientError as bcce
 
-
 import onepasswordconnectsdk
 import sentry_sdk
 
@@ -39,11 +38,12 @@ fetch_group.add_argument('--albums', action='store_true')
 fetch_group.add_argument('--artists', action='store_true')
 fetch_group.add_argument('--episodes', action='store_true')
 fetch_group.add_argument('--playlists', action='store_true')
+fetch_group.add_argument('--playlists-tracks', action='store_true')
 fetch_group.add_argument('--shows', action='store_true')
 fetch_group.add_argument('--top-artists', action='store_true')
 fetch_group.add_argument('--top-tracks', action='store_true')
 fetch_group.add_argument('--tracks', action='store_true')
-parser.add_argument('--no-filter-my-playlists', action='store_true', default=False, help='Fetch all playlist information.')
+parser.add_argument('--no-filter-my-playlists', action='store_true', default=False, help='Fetch all playlist tracks.')
 args = parser.parse_args()
 
 
@@ -168,7 +168,7 @@ def paginate(method_name, item_name, use_cursor=False, item_key=None, **kwargs):
         for idx, item in enumerate(iter_items):
             offset += 1
             return_items.append(item)
-        if use_cursor:
+        if 'cursors' in fetched_items:
             last_id = fetched_items['cursors']['after']
             if last_id is None:
                 break
@@ -222,20 +222,32 @@ if __name__ == "__main__":
         if args.ddb_fetch:
             items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
         else:
-            playlists = list()
+            items = list()
             user_id = sp.me()['id']
-            fetched_playlists = paginate(method_name='current_user_playlists', item_name=item_name)
-            for fetched_playlist in fetched_playlists:
-                if fetched_playlist['owner']['id'] == user_id or args.no_filter_my_playlists:
+            playlists = paginate(method_name='current_user_playlists', item_name=item_name)
+            for playlist in playlists:
+                if playlist['owner']['id'] == user_id or args.no_filter_my_playlists:
+                    items.append(playlist)
+    if args.playlists_tracks:
+        item_name = 'playlists tracks'
+        ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}playlists_tracks'
+        if args.ddb_fetch:
+            items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
+        else:
+            items = list()
+            playlist_count = 0
+            user_id = sp.me()['id']
+            playlists = paginate(method_name='current_user_playlists', item_name=item_name)
+            for playlist in playlists:
+                if playlist['owner']['id'] == user_id or args.no_filter_my_playlists:
+                    playlist_count += 1
                     log.info(f'Collecting playlist data for user {user_id}...')
-                    playlist_id = fetched_playlist['id']
+                    playlist_id = playlist['id']
                     log.info(f'Fetching tracks for playlist {playlist_id}...')
-                    playlist_items = paginate(method_name='playlist_items', item_name='playlist tracks', playlist_id=playlist_id)
-                    log.info(f'Fetched {len(playlist_items)} tracks for playlist {playlist_id}.')
-                    fetched_playlist['tracks'] = playlist_items
-                    playlists.append(fetched_playlist)
-            log.info(f'Fetched {len(playlists)} in total.')
-            items = playlists
+                    tracks = paginate(method_name='playlist_items', item_name='playlist tracks', playlist_id=playlist_id)
+                    log.info(f'Fetched {len(tracks)} tracks for playlist {playlist_id}.')
+                    items.extend(tracks)
+            log.info(f'{len(items)} tracks fetched across {playlist_count} playlists.')
     if args.shows:
         item_name='saved shows'
         ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}shows'
@@ -268,9 +280,7 @@ if __name__ == "__main__":
         ddb_table = boto3_ddb.Table(ddb_table_name)
         ddb_item_count = ddb_count(table_name=ddb_table_name, item_name=item_name)
         item_count = len(items)
-        if ddb_item_count > 0:
-            log.warning('Not updating existing DynamoDB table data.')
-        elif item_count > 0:
+        if item_count > 0:
             if args.albums:
                 pkey = 'album_name'
                 okeys = [pkey]
@@ -291,6 +301,11 @@ if __name__ == "__main__":
                 okeys = [pkey]
                 sub_item_name = None
                 sub_item_key = 'name'
+            if args.playlists_tracks:
+                pkey = 'track_id'
+                okeys = [pkey]
+                sub_item_name = 'track'
+                sub_item_key = 'id'
             if args.shows:
                 pkey = 'show_name'
                 okeys = [pkey]
@@ -311,24 +326,39 @@ if __name__ == "__main__":
                 okeys = [pkey]
                 sub_item_name = 'track'
                 sub_item_key = 'id'
+            log.info(f"Writing {item_count} {item_name} to DynamoDB table '{ddb_table_name}'...")
             item = None
-            try:
-                with ddb_table.batch_writer(overwrite_by_pkeys=okeys) as batch:
-                    for item in items:
-                        if sub_item_name:
-                            sub_item = item[sub_item_name]
-                        else:
-                            sub_item = item
-                        batch.put_item(
-                            Item={
-                                pkey: sub_item[sub_item_key],
-                                'info': item,
-                            },
-                        )
-            except (KeyError, bcce):
-                log.exception(f'Cannot index {str(item)}')
-                raise
-            log.info(f"Added {item_count} {item_name} to DynamoDB table '{ddb_table_name}'.")
+            pkey_value = None
+            put_count = 0
+            for item in items:
+                if sub_item_name:
+                    sub_item = item[sub_item_name]
+                else:
+                    sub_item = item
+                pkey_value = sub_item[sub_item_key]
+                if sub_item is None or pkey_value is None or item is None:
+                    if item:
+                        log.warning(f'Skipping null values derived from {str(item)}')
+                    continue
+                try:
+                    ddb_table.put_item(
+                        Item={
+                            pkey: pkey_value,
+                            'info': item,
+                        },
+                    )
+                    put_count += 1
+                    if (put_count % 50 == 0):
+                        log.info(f'Put {put_count} items...')
+                except bcce as e:
+                    error_code = e.response['Error']['Code']
+                    structured_data = None
+                    try:
+                        stuctured_data = json.dumps(item)
+                    except TypeError:
+                        structured_data = str(item)
+                    log.warning(f'{error_code} during put of {pkey_value}: {structured_data}', exc_info=True)
+            log.info(f"Added {put_count} {item_name} to DynamoDB table '{ddb_table_name}'.")
         else:
             log.warning('No {item_name} to add to DynamoDB.')
     if (args.json or args.ddb_fetch) and items:
