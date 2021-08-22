@@ -285,22 +285,22 @@ if __name__ == "__main__":
                 pkey = 'album_name'
                 okeys = [pkey]
                 sub_item_name = 'album'
-                sub_item_key = 'name'
+                sub_item_key = 'id'
             if args.artists:
                 pkey = 'artist'
                 okeys = [pkey]
                 sub_item_name = None
-                sub_item_key = 'name'
+                sub_item_key = 'id'
             if args.episodes:
                 pkey = 'episode'
                 okeys = [pkey]
                 sub_item_name = None
-                sub_item_key = 'name'
+                sub_item_key = 'id'
             if args.playlists:
                 pkey = 'playlist_name'
                 okeys = [pkey]
                 sub_item_name = None
-                sub_item_key = 'name'
+                sub_item_key = 'id'
             if args.playlists_tracks:
                 pkey = 'track_id'
                 okeys = [pkey]
@@ -310,12 +310,12 @@ if __name__ == "__main__":
                 pkey = 'show_name'
                 okeys = [pkey]
                 sub_item_name = 'show'
-                sub_item_key = 'name'
+                sub_item_key = 'id'
             if args.top_artists:
                 pkey = 'artist_name'
                 okeys = [pkey]
                 sub_item_name = None
-                sub_item_key = 'name'
+                sub_item_key = 'id'
             if args.top_tracks:
                 pkey = 'track_id'
                 okeys = [pkey]
@@ -350,8 +350,11 @@ if __name__ == "__main__":
                     put_count += 1
                     if (put_count % 50 == 0):
                         log.info(f'Put {put_count} items...')
-                except bcce as e:
-                    error_code = e.response['Error']['Code']
+                except (KeyError, TypeError, bcce) as e:
+                    if isinstance(e, bcce):
+                        error_code = e.response['Error']['Code']
+                    else:
+                        error_code = e.__class__.__name__
                     structured_data = None
                     try:
                         stuctured_data = json.dumps(item)
