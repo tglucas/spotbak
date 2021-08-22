@@ -191,6 +191,19 @@ def ddb_fetch(table_name, item_name):
     return response['Items']
 
 
+def log_exception(e, item):
+    if isinstance(e, bcce):
+        error_code = e.response['Error']['Code']
+    else:
+        error_code = e.__class__.__name__
+    structured_data = None
+    try:
+        structured_data = json.dumps(item)
+    except TypeError:
+        structured_data = str(item)
+    log.warning(f'{error_code} during put of {pkey_value}: {structured_data}', exc_info=True)
+
+
 if __name__ == "__main__":
     items = None
     ddb_table_name = None
@@ -282,48 +295,39 @@ if __name__ == "__main__":
         item_count = len(items)
         if item_count > 0:
             if args.albums:
-                pkey = 'album_name'
-                okeys = [pkey]
+                pkey = 'album_id'
                 sub_item_name = 'album'
                 sub_item_key = 'id'
             if args.artists:
-                pkey = 'artist'
-                okeys = [pkey]
+                pkey = 'artist_id'
                 sub_item_name = None
                 sub_item_key = 'id'
             if args.episodes:
-                pkey = 'episode'
-                okeys = [pkey]
+                pkey = 'episode_id'
                 sub_item_name = None
                 sub_item_key = 'id'
             if args.playlists:
-                pkey = 'playlist_name'
-                okeys = [pkey]
+                pkey = 'playlist_id'
                 sub_item_name = None
                 sub_item_key = 'id'
             if args.playlists_tracks:
                 pkey = 'track_id'
-                okeys = [pkey]
                 sub_item_name = 'track'
                 sub_item_key = 'id'
             if args.shows:
-                pkey = 'show_name'
-                okeys = [pkey]
+                pkey = 'show_id'
                 sub_item_name = 'show'
                 sub_item_key = 'id'
             if args.top_artists:
-                pkey = 'artist_name'
-                okeys = [pkey]
+                pkey = 'artist_id'
                 sub_item_name = None
                 sub_item_key = 'id'
             if args.top_tracks:
                 pkey = 'track_id'
-                okeys = [pkey]
                 sub_item_name = None
                 sub_item_key = 'id'
             if args.tracks:
                 pkey = 'track_id'
-                okeys = [pkey]
                 sub_item_name = 'track'
                 sub_item_key = 'id'
             log.info(f"Writing {item_count} {item_name} to DynamoDB table '{ddb_table_name}'...")
@@ -335,8 +339,12 @@ if __name__ == "__main__":
                     sub_item = item[sub_item_name]
                 else:
                     sub_item = item
+                if sub_item is None or item is None:
+                    if item:
+                        log.warning(f'Skipping null values derived from {str(item)}')
+                    continue
                 pkey_value = sub_item[sub_item_key]
-                if sub_item is None or pkey_value is None or item is None:
+                if pkey_value is None:
                     if item:
                         log.warning(f'Skipping null values derived from {str(item)}')
                     continue
@@ -350,20 +358,14 @@ if __name__ == "__main__":
                     put_count += 1
                     if (put_count % 50 == 0):
                         log.info(f'Put {put_count} items...')
-                except (KeyError, TypeError, bcce) as e:
-                    if isinstance(e, bcce):
-                        error_code = e.response['Error']['Code']
-                    else:
-                        error_code = e.__class__.__name__
-                    structured_data = None
-                    try:
-                        stuctured_data = json.dumps(item)
-                    except TypeError:
-                        structured_data = str(item)
-                    log.warning(f'{error_code} during put of {pkey_value}: {structured_data}', exc_info=True)
+                except bcce as e:
+                    log_exception(e=e, item=item)
+                except (KeyError, TypeError) as e:
+                    log_exception(e=e, item=item)
+                    raise
             log.info(f"Added {put_count} {item_name} to DynamoDB table '{ddb_table_name}'.")
         else:
-            log.warning('No {item_name} to add to DynamoDB.')
+            log.warning(f'No {item_name} to add to DynamoDB.')
     if (args.json or args.ddb_fetch) and items:
         if len(items) > 0:
             try:
