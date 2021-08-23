@@ -33,15 +33,15 @@ output_group = parser.add_mutually_exclusive_group(required=False)
 output_group.add_argument('--ddb-backup', action='store_true', help='Store result in DynamoDB')
 output_group.add_argument('--ddb-get', action='store_true', help='Fetch previously stored result in DynamoDB')
 fetch_group = parser.add_mutually_exclusive_group(required=True)
-fetch_group.add_argument('--albums', action='store_true')
-fetch_group.add_argument('--artists', action='store_true')
+fetch_group.add_argument('--albums', action='store_true', help="| jq '[.[] | {artist: .name, genre: .genres}]'")
+fetch_group.add_argument('--artists', action='store_true', help="| jq '[.[] | {artist: .album.artists[0].name, album: .album.name, track: [{name: .album.tracks.items[].name, track_number: .album.tracks.items[].track_number}]}]'")
 fetch_group.add_argument('--episodes', action='store_true')
-fetch_group.add_argument('--playlists', action='store_true')
-fetch_group.add_argument('--playlists-tracks', action='store_true')
-fetch_group.add_argument('--shows', action='store_true')
-fetch_group.add_argument('--top-artists', action='store_true')
-fetch_group.add_argument('--top-tracks', action='store_true')
-fetch_group.add_argument('--tracks', action='store_true')
+fetch_group.add_argument('--playlists', action='store_true', help="| jq '[.[] | {name: .name, tracks: .tracks.total, owner: .owner.display_name, public: .public, collaborative: .collaborative, id: .id}]'")
+fetch_group.add_argument('--playlists-tracks', action='store_true', help="| jq '[.[] | {artist: .track.artists[0].name, album: .track.album.name, name: .track.name}]'")
+fetch_group.add_argument('--shows', action='store_true', help="| jq '[.[] | {name: .show.name, description: .show.description}]'")
+fetch_group.add_argument('--top-artists', action='store_true', help="| jq '[.[] | {artist: .name, genre: .genres}]'")
+fetch_group.add_argument('--top-tracks', action='store_true', help="| jq '[.[] | {artist: .artists[0].name, album: .album.name, name: .name}]'")
+fetch_group.add_argument('--tracks', action='store_true', help="| jq '[.[] | {artist: .track.artists[0].name, album: .track.album.name, name: .track.name}]'")
 parser.add_argument('--no-filter-my-playlists', action='store_true', default=False, help='Fetch all playlist tracks.')
 args = parser.parse_args()
 
@@ -183,14 +183,24 @@ def ddb_count(table_name, item_name):
     return ddb_count
 
 
+def _ddb_unpack(response):
+    items = list()
+    for item in response['Items']:
+        # schema-specific unpack
+        items.append(item['info'])
+    return items
+
+
 def ddb_fetch(table_name, item_name):
     ddb_table = boto3_ddb.Table(table_name)
     log.info(f"Fetching {item_name} from table DynamoDB '{table_name}'...")
     response = ddb_table.scan()
     items = list()
-    for item in response['Items']:
-        # schema-specific unpack
-        items.append(item['info'])
+    items.extend(_ddb_unpack(response))
+    while 'LastEvaluatedKey' in response:
+        log.info(f"Fetching another page of {item_name} from table DynamoDB '{table_name}'...")
+        response = ddb_table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
+        items.extend(_ddb_unpack(response))
     return items
 
 
