@@ -32,7 +32,6 @@ parser: ArgumentParser = argparse.ArgumentParser(description='Fetch Spotify cont
 output_group = parser.add_mutually_exclusive_group(required=True)
 output_group.add_argument('--ddb-backup', action='store_true', help='Store result in DynamoDB')
 output_group.add_argument('--ddb-fetch', action='store_true', help='Fetch previously stored result in DynamoDB')
-output_group.add_argument('--json', action='store_true', help='Print JSON output')
 fetch_group = parser.add_mutually_exclusive_group(required=True)
 fetch_group.add_argument('--albums', action='store_true')
 fetch_group.add_argument('--artists', action='store_true')
@@ -188,7 +187,11 @@ def ddb_fetch(table_name, item_name):
     ddb_table = boto3_ddb.Table(table_name)
     log.info(f"Fetching {item_name} from table DynamoDB '{table_name}'...")
     response = ddb_table.scan()
-    return response['Items']
+    items = list()
+    for item in response['Items']:
+        # schema-specific unpack
+        items.append(item['info'])
+    return items
 
 
 def log_exception(e, item):
@@ -366,12 +369,13 @@ if __name__ == "__main__":
             log.info(f"Added {put_count} {item_name} to DynamoDB table '{ddb_table_name}'.")
         else:
             log.warning(f'No {item_name} to add to DynamoDB.')
-    if (args.json or args.ddb_fetch) and items:
+    if not args.ddb_backup and items:
         if len(items) > 0:
             try:
                 print(json.dumps(items))
             except TypeError:
                 log.exception(f'Cannot JSON dump {str(items)}')
+                raise
         else:
             log.warning('No items for JSON.')
     if not items or (items and len(items) == 0):
