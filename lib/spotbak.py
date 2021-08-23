@@ -29,9 +29,9 @@ from spotipy.exceptions import SpotifyException
 
 
 parser: ArgumentParser = argparse.ArgumentParser(description='Fetch Spotify content.')
-output_group = parser.add_mutually_exclusive_group(required=True)
+output_group = parser.add_mutually_exclusive_group(required=False)
 output_group.add_argument('--ddb-backup', action='store_true', help='Store result in DynamoDB')
-output_group.add_argument('--ddb-fetch', action='store_true', help='Fetch previously stored result in DynamoDB')
+output_group.add_argument('--ddb-get', action='store_true', help='Fetch previously stored result in DynamoDB')
 fetch_group = parser.add_mutually_exclusive_group(required=True)
 fetch_group.add_argument('--albums', action='store_true')
 fetch_group.add_argument('--artists', action='store_true')
@@ -214,28 +214,28 @@ if __name__ == "__main__":
     if args.albums:
         item_name='saved albums'
         ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}albums'
-        if args.ddb_fetch:
+        if args.ddb_get:
             items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_saved_albums', item_name=item_name)
     if args.artists:
         item_name = 'followed artists'
         ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}artists'
-        if args.ddb_fetch:
+        if args.ddb_get:
             items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_followed_artists', item_name=item_name, use_cursor=True, item_key='artists')
     if args.episodes:
         item_name='saved episodes'
         ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}episodes'
-        if args.ddb_fetch:
+        if args.ddb_get:
             items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_saved_episodes', item_name=item_name)
     if args.playlists:
         item_name = 'playlists'
         ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}playlists'
-        if args.ddb_fetch:
+        if args.ddb_get:
             items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
         else:
             items = list()
@@ -247,7 +247,7 @@ if __name__ == "__main__":
     if args.playlists_tracks:
         item_name = 'playlists tracks'
         ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}playlists_tracks'
-        if args.ddb_fetch:
+        if args.ddb_get:
             items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
         else:
             items = list()
@@ -267,28 +267,28 @@ if __name__ == "__main__":
     if args.shows:
         item_name='saved shows'
         ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}shows'
-        if args.ddb_fetch:
+        if args.ddb_get:
             items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_saved_shows', item_name=item_name)
     if args.top_artists:
         item_name='top artists'
         ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}top_artists'
-        if args.ddb_fetch:
+        if args.ddb_get:
             items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_top_artists', item_name=item_name)
     if args.top_tracks:
         item_name='top tracks'
         ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}top_tracks'
-        if args.ddb_fetch:
+        if args.ddb_get:
             items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_top_tracks', item_name=item_name)
     if args.tracks:
         item_name = 'saved tracks'
         ddb_table_name=f'{DDB_TABLE_NAME_PREFIX}tracks'
-        if args.ddb_fetch:
+        if args.ddb_get:
             items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_saved_tracks', item_name=item_name)
