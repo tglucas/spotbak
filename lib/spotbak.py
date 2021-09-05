@@ -401,7 +401,7 @@ if __name__ == "__main__":
                     if args.db_backup:
                         db_handle.execute(
                             f"INSERT INTO {db_table_name} (spotify_{pkey}, spotify_json) VALUES (%s, %s)",
-                            (pkey_value, item))
+                            (pkey_value, json.dumps(item)))
                     if args.ddb_backup:
                         db_handle.put_item(
                             Item={
