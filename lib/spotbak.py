@@ -47,6 +47,7 @@ fetch_group.add_argument('--top-artists', action='store_true', help="| jq '[.[] 
 fetch_group.add_argument('--top-tracks', action='store_true', help="| jq '[.[] | {artist: .artists[0].name, album: .album.name, name: .name}]'")
 fetch_group.add_argument('--tracks', action='store_true', help="| jq '[.[] | {artist: .track.artists[0].name, album: .track.album.name, name: .track.name}]'")
 parser.add_argument('--no-filter-my-playlists', action='store_true', default=False, help='Fetch all playlist tracks.')
+parser.add_argument('--debug', action='store_true', default=False, help='Use debug level logging.')
 args = parser.parse_args()
 
 
@@ -68,7 +69,10 @@ if sys.stdout.isatty():
 #syslog_handler.setFormatter(formatter)
 #log.addHandler(syslog_handler)
 
-log.setLevel(logging.INFO)
+if args.debug:
+    log.setLevel(logging.DEBUG)
+else:
+    log.setLevel(logging.INFO)
 
 
 # credentials
@@ -127,8 +131,9 @@ DB_NAME = 'spotbak'
 DB_TABLE_NAME_PREFIX = f'{DB_NAME}_'
 
 
+log.debug(f'Opening Postgres DB connection {creds.postgres_user}@{creds.postgres_ip}/{DB_NAME}...')
 pg_conn = psycopg2.connect(
-    dsn=creds.postgres_ip,
+    host=creds.postgres_ip,
     database=DB_NAME,
     user=creds.postgres_user,
     password=creds.postgres_password)
@@ -217,6 +222,17 @@ def ddb_fetch(table_name, item_name):
         response = ddb_table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
         items.extend(_ddb_unpack(response))
     return items
+
+
+def db_execute(c, sql):
+    log.debug(sql)
+    c.execute(sql)
+
+
+def db_create_schema(c, table_name, primary_key):
+    db_execute(c=c, sql=f"create table if not exists {table_name} ({primary_key} serial primary key, spotify_{primary_key} varchar(255), spotify_json jsonb not null);")
+    db_execute(c=c, sql=f"create unique index if not exists spotify_{primary_key}_idx on {table_name}(spotify_{primary_key});")
+    db_execute(c=c, sql=f"CREATE INDEX if not exists spotify_json_idx ON {table_name} USING gin (spotify_json);")
 
 
 def log_exception(e, item):
@@ -363,10 +379,7 @@ if __name__ == "__main__":
             log.info(f"Writing {item_count} {item_name} to DB table '{db_table_name}'...")
             if args.db_backup:
                 db_handle = pg_conn.cursor()
-                #FIXME: escape
-                db_handle.execute(f"create table if not exists tracks ({pkey} serial primary key, spotify_{pkey} varchar(255), spotify_json jsonb not null);")
-                db_handle.execute(f"create unique index if not exists spotify_{pkey}_idx on tracks(spotify_{pkey});")
-                db_handle.execute(f"CREATE INDEX if not exists spotify_json_idx ON tracks USING gin (spotify_json);")
+                db_create_schema(c=db_handle, table_name=db_table_name, primary_key=pkey)
             item = None
             pkey_value = None
             put_count = 0
@@ -401,6 +414,10 @@ if __name__ == "__main__":
                     log_exception(e=e, item=item)
                     raise
             log.info(f"Added {put_count} {item_name} to DB table '{db_table_name}'.")
+            if args.db_backup:
+                log.debug('Committing DB connection and closing cursor...')
+                pg_conn.commit()
+                db_handle.close()
         else:
             log.warning(f'No {item_name} to add to DB.')
     if not args.ddb_backup and items:
