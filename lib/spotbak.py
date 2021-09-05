@@ -27,10 +27,14 @@ from spotipy.oauth2 import SpotifyOAuth
 from spotipy.oauth2 import SpotifyClientCredentials
 from spotipy.exceptions import SpotifyException
 
+import psycopg2
+
 
 parser: ArgumentParser = argparse.ArgumentParser(description='Fetch Spotify content.')
 output_group = parser.add_mutually_exclusive_group(required=False)
+output_group.add_argument('--db-backup', action='store_true', help='Store result in Postgres database')
 output_group.add_argument('--ddb-backup', action='store_true', help='Store result in DynamoDB')
+output_group.add_argument('--db-get', action='store_true', help='Fetch previously stored result in Postgres database')
 output_group.add_argument('--ddb-get', action='store_true', help='Fetch previously stored result in DynamoDB')
 fetch_group = parser.add_mutually_exclusive_group(required=True)
 fetch_group.add_argument('--albums', action='store_true', help="| jq '[.[] | {artist: .name, genre: .genres}]'")
@@ -76,6 +80,9 @@ class CredsConfig:
     spotify_client_id: f'opitem:"Spotify" opfield:dev.id' = None # type: ignore
     spotify_client_secret: f'opitem:"Spotify" opfield:dev.secret' = None # type: ignore
     spotify_client_uri: f'opitem:"Spotify" opfield:dev.uri' = None # type: ignore
+    postgres_ip: f'opitem:"Postgres" opfield:DB.IP' = None # type: ignore
+    postgres_user: f'opitem:"Postgres" opfield:.username' = None # type: ignore
+    postgres_password: f'opitem:"Postgres" opfield:.password' = None # type: ignore
 
 
 # test required variables
@@ -116,7 +123,15 @@ boto3_session = Session(
     botocore_session=boto_session)
 
 boto3_ddb = boto3.resource('dynamodb')
-DDB_TABLE_NAME_PREFIX = 'spotbak_'
+DB_NAME = 'spotbak'
+DB_TABLE_NAME_PREFIX = f'{DB_NAME}_'
+
+
+pg_conn = psycopg2.connect(
+    dsn=creds.postgres_ip,
+    database=DB_NAME,
+    user=creds.postgres_user,
+    password=creds.postgres_password)
 
 
 os.environ['SPOTIPY_CLIENT_ID'] = creds.spotify_client_id
@@ -219,34 +234,34 @@ def log_exception(e, item):
 
 if __name__ == "__main__":
     items = None
-    ddb_table_name = None
+    db_table_name = None
     item_name = None
     if args.albums:
         item_name='saved albums'
-        ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}albums'
+        db_table_name = f'{DB_TABLE_NAME_PREFIX}albums'
         if args.ddb_get:
-            items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
+            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_saved_albums', item_name=item_name)
     if args.artists:
         item_name = 'followed artists'
-        ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}artists'
+        db_table_name = f'{DB_TABLE_NAME_PREFIX}artists'
         if args.ddb_get:
-            items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
+            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_followed_artists', item_name=item_name, use_cursor=True, item_key='artists')
     if args.episodes:
         item_name='saved episodes'
-        ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}episodes'
+        db_table_name = f'{DB_TABLE_NAME_PREFIX}episodes'
         if args.ddb_get:
-            items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
+            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_saved_episodes', item_name=item_name)
     if args.playlists:
         item_name = 'playlists'
-        ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}playlists'
+        db_table_name = f'{DB_TABLE_NAME_PREFIX}playlists'
         if args.ddb_get:
-            items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
+            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
         else:
             items = list()
             user_id = sp.me()['id']
@@ -256,9 +271,9 @@ if __name__ == "__main__":
                     items.append(playlist)
     if args.playlists_tracks:
         item_name = 'playlists tracks'
-        ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}playlists_tracks'
+        db_table_name = f'{DB_TABLE_NAME_PREFIX}playlists_tracks'
         if args.ddb_get:
-            items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
+            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
         else:
             items = list()
             playlist_count = 0
@@ -276,35 +291,37 @@ if __name__ == "__main__":
             log.info(f'{len(items)} tracks fetched across {playlist_count} playlists.')
     if args.shows:
         item_name='saved shows'
-        ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}shows'
+        db_table_name = f'{DB_TABLE_NAME_PREFIX}shows'
         if args.ddb_get:
-            items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
+            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_saved_shows', item_name=item_name)
     if args.top_artists:
         item_name='top artists'
-        ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}top_artists'
+        db_table_name = f'{DB_TABLE_NAME_PREFIX}top_artists'
         if args.ddb_get:
-            items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
+            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_top_artists', item_name=item_name)
     if args.top_tracks:
         item_name='top tracks'
-        ddb_table_name = f'{DDB_TABLE_NAME_PREFIX}top_tracks'
+        db_table_name = f'{DB_TABLE_NAME_PREFIX}top_tracks'
         if args.ddb_get:
-            items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
+            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_top_tracks', item_name=item_name)
     if args.tracks:
         item_name = 'saved tracks'
-        ddb_table_name=f'{DDB_TABLE_NAME_PREFIX}tracks'
+        db_table_name=f'{DB_TABLE_NAME_PREFIX}tracks'
         if args.ddb_get:
-            items = ddb_fetch(table_name=ddb_table_name, item_name=item_name)
+            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
         else:
             items = paginate(method_name='current_user_saved_tracks', item_name=item_name)
-    if args.ddb_backup:
-        ddb_table = boto3_ddb.Table(ddb_table_name)
-        ddb_item_count = ddb_count(table_name=ddb_table_name, item_name=item_name)
+    if args.db_backup or args.ddb_backup:
+        db_handle = None
+        if args.ddb_backup:
+            db_handle = boto3_ddb.Table(db_table_name)
+        #FIXME: ddb_item_count = ddb_count(table_name=db_table_name, item_name=item_name)
         item_count = len(items)
         if item_count > 0:
             if args.albums:
@@ -343,7 +360,13 @@ if __name__ == "__main__":
                 pkey = 'track_id'
                 sub_item_name = 'track'
                 sub_item_key = 'id'
-            log.info(f"Writing {item_count} {item_name} to DynamoDB table '{ddb_table_name}'...")
+            log.info(f"Writing {item_count} {item_name} to DB table '{db_table_name}'...")
+            if args.db_backup:
+                db_handle = pg_conn.cursor()
+                #FIXME: escape
+                db_handle.execute(f"create table if not exists tracks ({pkey} serial primary key, spotify_{pkey} varchar(255), spotify_json jsonb not null);")
+                db_handle.execute(f"create unique index if not exists spotify_{pkey}_idx on tracks(spotify_{pkey});")
+                db_handle.execute(f"CREATE INDEX if not exists spotify_json_idx ON tracks USING gin (spotify_json);")
             item = None
             pkey_value = None
             put_count = 0
@@ -362,12 +385,13 @@ if __name__ == "__main__":
                         log.warning(f'Skipping null values derived from {str(item)}')
                     continue
                 try:
-                    ddb_table.put_item(
-                        Item={
-                            pkey: pkey_value,
-                            'info': item,
-                        },
-                    )
+                    if args.ddb_backup:
+                        db_handle.put_item(
+                            Item={
+                                pkey: pkey_value,
+                                'info': item,
+                            },
+                        )
                     put_count += 1
                     if (put_count % 50 == 0):
                         log.info(f'Put {put_count} items...')
@@ -376,9 +400,9 @@ if __name__ == "__main__":
                 except (KeyError, TypeError) as e:
                     log_exception(e=e, item=item)
                     raise
-            log.info(f"Added {put_count} {item_name} to DynamoDB table '{ddb_table_name}'.")
+            log.info(f"Added {put_count} {item_name} to DB table '{db_table_name}'.")
         else:
-            log.warning(f'No {item_name} to add to DynamoDB.')
+            log.warning(f'No {item_name} to add to DB.')
     if not args.ddb_backup and items:
         if len(items) > 0:
             try:
@@ -390,4 +414,6 @@ if __name__ == "__main__":
             log.warning('No items for JSON.')
     if not items or (items and len(items) == 0):
         log.warning('Nothing fetched.')
+    log.info('Closing database connection...')
+    pg_conn.close()
     log.info('Goodbye.')

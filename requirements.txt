@@ -1,6 +1,7 @@
 boto3
 onepasswordconnectsdk
 pathtools
+psycopg2-binary
 python-dateutil
 pytz
 sentry-sdk
