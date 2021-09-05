@@ -230,7 +230,7 @@ def db_execute(c, sql):
 
 
 def db_create_schema(c, table_name, primary_key):
-    db_execute(c=c, sql=f"create table if not exists {table_name} ({primary_key} serial primary key, spotify_{primary_key} varchar(255), spotify_json jsonb not null);")
+    db_execute(c=c, sql=f"create table if not exists {table_name} ({primary_key} serial primary key, spotify_{primary_key} varchar(32), spotify_json jsonb not null);")
     db_execute(c=c, sql=f"create unique index if not exists spotify_{primary_key}_idx on {table_name}(spotify_{primary_key});")
     db_execute(c=c, sql=f"CREATE INDEX if not exists spotify_json_idx ON {table_name} USING gin (spotify_json);")
 
@@ -398,6 +398,10 @@ if __name__ == "__main__":
                         log.warning(f'Skipping null values derived from {str(item)}')
                     continue
                 try:
+                    if args.db_backup:
+                        db_handle.execute(
+                            f"INSERT INTO {db_table_name} (spotify_{pkey}, spotify_json) VALUES (%s, %s)",
+                            (pkey_value, item))
                     if args.ddb_backup:
                         db_handle.put_item(
                             Item={
@@ -420,7 +424,7 @@ if __name__ == "__main__":
                 db_handle.close()
         else:
             log.warning(f'No {item_name} to add to DB.')
-    if not args.ddb_backup and items:
+    if not args.db_backup and not args.ddb_backup and items:
         if len(items) > 0:
             try:
                 print(json.dumps(items))
