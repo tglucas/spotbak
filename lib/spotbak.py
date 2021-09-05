@@ -28,6 +28,7 @@ from spotipy.oauth2 import SpotifyClientCredentials
 from spotipy.exceptions import SpotifyException
 
 import psycopg2
+from psycopg2.errors import DatabaseError as dboops
 
 
 parser: ArgumentParser = argparse.ArgumentParser(description='Fetch Spotify content.')
@@ -400,7 +401,7 @@ if __name__ == "__main__":
                 try:
                     if args.db_backup:
                         db_handle.execute(
-                            f"INSERT INTO {db_table_name} (spotify_{pkey}, spotify_json) VALUES (%s, %s)",
+                            f"INSERT INTO {db_table_name} (spotify_{pkey}, spotify_json) VALUES (%s, %s) ON CONFLICT (spotify_{pkey}) DO NOTHING",
                             (pkey_value, json.dumps(item)))
                     if args.ddb_backup:
                         db_handle.put_item(
@@ -414,7 +415,7 @@ if __name__ == "__main__":
                         log.info(f'Put {put_count} items...')
                 except bcce as e:
                     log_exception(e=e, item=item)
-                except (KeyError, TypeError) as e:
+                except (KeyError, TypeError, dboops) as e: # type: ignore
                     log_exception(e=e, item=item)
                     raise
             log.info(f"Added {put_count} {item_name} to DB table '{db_table_name}'.")
