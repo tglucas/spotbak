@@ -231,8 +231,7 @@ def db_execute(c, sql):
 
 
 def db_create_schema(c, table_name, primary_key):
-    db_execute(c=c, sql=f"create table if not exists {table_name} ({primary_key} serial primary key, spotify_{primary_key} varchar(32), spotify_json jsonb not null);")
-    db_execute(c=c, sql=f"create unique index if not exists spotify_{primary_key}_idx on {table_name}(spotify_{primary_key});")
+    db_execute(c=c, sql=f"create table if not exists {table_name} ({primary_key} serial primary key, spotify_{primary_key} varchar(32), spotify_json jsonb not null, unique(spotify_{primary_key}));")
     db_execute(c=c, sql=f"CREATE INDEX if not exists spotify_json_idx ON {table_name} USING gin (spotify_json);")
 
 
@@ -412,13 +411,13 @@ if __name__ == "__main__":
                         )
                     put_count += 1
                     if (put_count % 50 == 0):
-                        log.info(f'Put {put_count} items...')
+                        log.info(f'Inserted {put_count} DB items so far...')
                 except bcce as e:
                     log_exception(e=e, item=item)
                 except (KeyError, TypeError, dboops) as e: # type: ignore
                     log_exception(e=e, item=item)
                     raise
-            log.info(f"Added {put_count} {item_name} to DB table '{db_table_name}'.")
+            log.info(f"Added {put_count} (of {len(items)}) {item_name} to DB table '{db_table_name}'.")
             if args.db_backup:
                 log.debug('Committing DB connection and closing cursor...')
                 pg_conn.commit()
