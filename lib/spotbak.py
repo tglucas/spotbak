@@ -140,7 +140,7 @@ DB_NAME = 'spotbak'
 DB_TABLE_NAME_PREFIX = f'{DB_NAME}_'
 
 pg_conn = None
-if args.postgres_backup:
+if args.postgres_backup or args.postgres_get:
     log.debug(f'Opening Postgres DB connection {creds.postgres_user}@{creds.postgres_ip}/{DB_NAME}...')
     pg_conn = psycopg2.connect(
         host=creds.postgres_ip,
@@ -149,7 +149,7 @@ if args.postgres_backup:
         password=creds.postgres_password)
 
 md_conn = None
-if args.mongodb_backup:
+if args.mongodb_backup or args.mongodb_get:
     log.debug(f'Opening MongoDB connection {creds.mongodb_user}@{creds.mongodb_ip}/{DB_NAME}...')
     db_url = creds.mongodb_ip.replace('__USER__', creds.mongodb_user).replace('__PASSWORD__', creds.mongodb_password)
     md_conn = MongoClient(db_url)
@@ -216,6 +216,20 @@ def pg_execute(c, sql):
     c.execute(sql)
 
 
+def md_get(db_name, collection_name, query={}, projection={}, sort=[]):
+    database = md_conn[db_name]
+    collection = database[collection_name]
+    items = list()
+    cursor = collection.find(query, projection = projection, sort = sort)
+    try:
+        for doc in cursor:
+            del doc['_id']
+            items.append(doc)
+    finally:
+        md_conn.close()
+    return items
+
+
 def pg_create_schema(c, table_name, primary_key):
     pg_execute(c=c, sql=f"create table if not exists {table_name} ({primary_key} serial primary key, spotify_{primary_key} varchar(32), spotify_json jsonb not null, unique(spotify_{primary_key}));")
     pg_execute(c=c, sql=f"CREATE INDEX if not exists spotify_json_idx ON {table_name} USING gin (spotify_json);")
@@ -244,7 +258,15 @@ if __name__ == "__main__":
         if args.postgres_get:
             pass
         elif args.mongodb_get:
-            pass
+            projection = {}
+            #projection["album.name"] = 1.0
+            #projection["album.artists.name"] = {
+            #    u"$slice": 1.0
+            #}
+            #projection["album.release_date"] = 1.0
+            sort = []
+            #sort = [ (u"album.release_date", 1) ]
+            items = md_get(db_name=DB_NAME, collection_name=db_table_name, projection=projection, sort=sort)
         else:
             items = paginate(method_name='current_user_saved_albums', item_name=item_name)
     if args.artists:
@@ -253,7 +275,7 @@ if __name__ == "__main__":
         if args.postgres_get:
             pass
         elif args.mongodb_get:
-            pass
+            items = md_get(db_name=DB_NAME, collection_name=db_table_name)
         else:
             items = paginate(method_name='current_user_followed_artists', item_name=item_name, use_cursor=True, item_key='artists')
     if args.episodes:
@@ -262,7 +284,7 @@ if __name__ == "__main__":
         if args.postgres_get:
             pass
         elif args.mongodb_get:
-            pass
+            items = md_get(db_name=DB_NAME, collection_name=db_table_name)
         else:
             items = paginate(method_name='current_user_saved_episodes', item_name=item_name)
     if args.playlists:
@@ -271,7 +293,7 @@ if __name__ == "__main__":
         if args.postgres_get:
             pass
         elif args.mongodb_get:
-            pass
+            items = md_get(db_name=DB_NAME, collection_name=db_table_name)
         else:
             items = list()
             user_id = sp.me()['id']
@@ -285,7 +307,7 @@ if __name__ == "__main__":
         if args.postgres_get:
             pass
         elif args.mongodb_get:
-            pass
+            items = md_get(db_name=DB_NAME, collection_name=db_table_name)
         else:
             items = list()
             playlist_count = 0
@@ -307,7 +329,7 @@ if __name__ == "__main__":
         if args.postgres_get:
             pass
         elif args.mongodb_get:
-            pass
+            items = md_get(db_name=DB_NAME, collection_name=db_table_name)
         else:
             items = paginate(method_name='current_user_saved_shows', item_name=item_name)
     if args.top_artists:
@@ -316,7 +338,7 @@ if __name__ == "__main__":
         if args.postgres_get:
             pass
         elif args.mongodb_get:
-            pass
+            items = md_get(db_name=DB_NAME, collection_name=db_table_name)
         else:
             items = paginate(method_name='current_user_top_artists', item_name=item_name)
     if args.top_tracks:
@@ -325,7 +347,7 @@ if __name__ == "__main__":
         if args.postgres_get:
             pass
         elif args.mongodb_get:
-            pass
+            items = md_get(db_name=DB_NAME, collection_name=db_table_name)
         else:
             items = paginate(method_name='current_user_top_tracks', item_name=item_name)
     if args.tracks:
@@ -334,13 +356,13 @@ if __name__ == "__main__":
         if args.postgres_get:
             pass
         elif args.mongodb_get:
-            pass
+            items = md_get(db_name=DB_NAME, collection_name=db_table_name)
         else:
             items = paginate(method_name='current_user_saved_tracks', item_name=item_name)
     if args.postgres_backup or args.mongodb_backup:
-        db_handle = None
         item_count = len(items)
         if item_count > 0:
+            db_handle = None
             if args.albums:
                 pkey = 'album_id'
                 sub_item_name = 'album'
@@ -382,8 +404,8 @@ if __name__ == "__main__":
                 db_handle = pg_conn.cursor()
                 pg_create_schema(c=db_handle, table_name=db_table_name, primary_key=pkey)
             elif args.mongodb_backup:
-                md_collection = md_conn[DB_NAME]
-                db_handle = md_collection[db_table_name]
+                md_db = md_conn[DB_NAME]
+                db_handle = md_db[db_table_name]
             item = None
             pkey_value = None
             put_count = 0
