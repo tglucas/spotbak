@@ -9,7 +9,6 @@ import simplejson as json
 
 import boto3
 from boto3 import Session
-from boto3.dynamodb.conditions import Key, Attr
 from botocore.session import Session as BotoCoreSession
 from botocore.exceptions import ClientError as bcce
 
@@ -30,13 +29,16 @@ from spotipy.exceptions import SpotifyException
 import psycopg2
 from psycopg2.errors import DatabaseError as dboops
 
+from pymongo import MongoClient
+
 
 parser: ArgumentParser = argparse.ArgumentParser(description='Fetch Spotify content.')
 output_group = parser.add_mutually_exclusive_group(required=False)
-output_group.add_argument('--db-backup', action='store_true', help='Store result in Postgres database')
-output_group.add_argument('--ddb-backup', action='store_true', help='Store result in DynamoDB')
-output_group.add_argument('--db-get', action='store_true', help='Fetch previously stored result in Postgres database')
-output_group.add_argument('--ddb-get', action='store_true', help='Fetch previously stored result in DynamoDB')
+output_group.add_argument('--postgres-backup', action='store_true', help='Store result in Postgres database')
+output_group.add_argument('--mongodb-backup', action='store_true', help='Store result in MongoDB')
+output_group.add_argument('--s3-backup', action='store_true', help='Store result in S3')
+output_group.add_argument('--postgres-get', action='store_true', help='Fetch previously stored result in Postgres database')
+output_group.add_argument('--mongodb-get', action='store_true', help='Fetch previously stored result in MongoDB')
 fetch_group = parser.add_mutually_exclusive_group(required=True)
 fetch_group.add_argument('--albums', action='store_true', help="| jq '[.[] | {artist: .name, genre: .genres}]'")
 fetch_group.add_argument('--artists', action='store_true', help="| jq '[.[] | {artist: .album.artists[0].name, album: .album.name, track: [{name: .album.tracks.items[].name, track_number: .album.tracks.items[].track_number}]}]'")
@@ -88,6 +90,9 @@ class CredsConfig:
     postgres_ip: f'opitem:"Postgres" opfield:DB.IP' = None # type: ignore
     postgres_user: f'opitem:"Postgres" opfield:.username' = None # type: ignore
     postgres_password: f'opitem:"Postgres" opfield:.password' = None # type: ignore
+    mongodb_ip: f'opitem:"MongoDB" opfield:DB.IP' = None # type: ignore
+    mongodb_user: f'opitem:"MongoDB" opfield:.username' = None # type: ignore
+    mongodb_password: f'opitem:"MongoDB" opfield:.password' = None # type: ignore
 
 
 # test required variables
@@ -97,6 +102,7 @@ except KeyError:
     default_op_connect_server = 'http://localhost:8080'
     log.debug(f'Environment variable OP_CONNECT_SERVER not specified, using [{default_op_connect_server}].')
     op_connect_server = default_op_connect_server
+
 
 os.environ['OP_CONNECT_TOKEN']
 os.environ['OP_VAULT']
@@ -120,6 +126,7 @@ except KeyError:
     os.environ['AWS_ACCESS_KEY_ID'] = creds.aws_akid
     os.environ['AWS_SECRET_ACCESS_KEY'] = creds.aws_sak
 
+
 boto_session = BotoCoreSession()
 boto3_session = Session(
     aws_access_key_id=creds.aws_akid,
@@ -127,18 +134,25 @@ boto3_session = Session(
     region_name=AWS_REGION,
     botocore_session=boto_session)
 
-boto3_ddb = boto3.resource('dynamodb')
+# TODO: S3
+
 DB_NAME = 'spotbak'
 DB_TABLE_NAME_PREFIX = f'{DB_NAME}_'
 
+pg_conn = None
+if args.postgres_backup:
+    log.debug(f'Opening Postgres DB connection {creds.postgres_user}@{creds.postgres_ip}/{DB_NAME}...')
+    pg_conn = psycopg2.connect(
+        host=creds.postgres_ip,
+        database=DB_NAME,
+        user=creds.postgres_user,
+        password=creds.postgres_password)
 
-log.debug(f'Opening Postgres DB connection {creds.postgres_user}@{creds.postgres_ip}/{DB_NAME}...')
-pg_conn = psycopg2.connect(
-    host=creds.postgres_ip,
-    database=DB_NAME,
-    user=creds.postgres_user,
-    password=creds.postgres_password)
-
+md_conn = None
+if args.mongodb_backup:
+    log.debug(f'Opening MongoDB connection {creds.mongodb_user}@{creds.mongodb_ip}/{DB_NAME}...')
+    db_url = creds.mongodb_ip.replace('__USER__', creds.mongodb_user).replace('__PASSWORD__', creds.mongodb_password)
+    md_conn = MongoClient(db_url)
 
 os.environ['SPOTIPY_CLIENT_ID'] = creds.spotify_client_id
 os.environ['SPOTIPY_CLIENT_SECRET'] = creds.spotify_client_secret
@@ -197,42 +211,14 @@ def paginate(method_name, item_name, use_cursor=False, item_key=None, **kwargs):
     return return_items
 
 
-def ddb_count(table_name, item_name):
-    ddb_table = boto3_ddb.Table(table_name)
-    ddb_count = ddb_table.item_count
-    log.info(f"DynamoDB table '{table_name}' contains {ddb_count} {item_name}.")
-    return ddb_count
-
-
-def _ddb_unpack(response):
-    items = list()
-    for item in response['Items']:
-        # schema-specific unpack
-        items.append(item['info'])
-    return items
-
-
-def ddb_fetch(table_name, item_name):
-    ddb_table = boto3_ddb.Table(table_name)
-    log.info(f"Fetching {item_name} from table DynamoDB '{table_name}'...")
-    response = ddb_table.scan()
-    items = list()
-    items.extend(_ddb_unpack(response))
-    while 'LastEvaluatedKey' in response:
-        log.info(f"Fetching another page of {item_name} from table DynamoDB '{table_name}'...")
-        response = ddb_table.scan(ExclusiveStartKey=response['LastEvaluatedKey'])
-        items.extend(_ddb_unpack(response))
-    return items
-
-
-def db_execute(c, sql):
+def pg_execute(c, sql):
     log.debug(sql)
     c.execute(sql)
 
 
-def db_create_schema(c, table_name, primary_key):
-    db_execute(c=c, sql=f"create table if not exists {table_name} ({primary_key} serial primary key, spotify_{primary_key} varchar(32), spotify_json jsonb not null, unique(spotify_{primary_key}));")
-    db_execute(c=c, sql=f"CREATE INDEX if not exists spotify_json_idx ON {table_name} USING gin (spotify_json);")
+def pg_create_schema(c, table_name, primary_key):
+    pg_execute(c=c, sql=f"create table if not exists {table_name} ({primary_key} serial primary key, spotify_{primary_key} varchar(32), spotify_json jsonb not null, unique(spotify_{primary_key}));")
+    pg_execute(c=c, sql=f"CREATE INDEX if not exists spotify_json_idx ON {table_name} USING gin (spotify_json);")
 
 
 def log_exception(e, item):
@@ -255,29 +241,37 @@ if __name__ == "__main__":
     if args.albums:
         item_name='saved albums'
         db_table_name = f'{DB_TABLE_NAME_PREFIX}albums'
-        if args.ddb_get:
-            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
+        if args.postgres_get:
+            pass
+        elif args.mongodb_get:
+            pass
         else:
             items = paginate(method_name='current_user_saved_albums', item_name=item_name)
     if args.artists:
         item_name = 'followed artists'
         db_table_name = f'{DB_TABLE_NAME_PREFIX}artists'
-        if args.ddb_get:
-            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
+        if args.postgres_get:
+            pass
+        elif args.mongodb_get:
+            pass
         else:
             items = paginate(method_name='current_user_followed_artists', item_name=item_name, use_cursor=True, item_key='artists')
     if args.episodes:
         item_name='saved episodes'
         db_table_name = f'{DB_TABLE_NAME_PREFIX}episodes'
-        if args.ddb_get:
-            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
+        if args.postgres_get:
+            pass
+        elif args.mongodb_get:
+            pass
         else:
             items = paginate(method_name='current_user_saved_episodes', item_name=item_name)
     if args.playlists:
         item_name = 'playlists'
         db_table_name = f'{DB_TABLE_NAME_PREFIX}playlists'
-        if args.ddb_get:
-            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
+        if args.postgres_get:
+            pass
+        elif args.mongodb_get:
+            pass
         else:
             items = list()
             user_id = sp.me()['id']
@@ -288,8 +282,10 @@ if __name__ == "__main__":
     if args.playlists_tracks:
         item_name = 'playlists tracks'
         db_table_name = f'{DB_TABLE_NAME_PREFIX}playlists_tracks'
-        if args.ddb_get:
-            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
+        if args.postgres_get:
+            pass
+        elif args.mongodb_get:
+            pass
         else:
             items = list()
             playlist_count = 0
@@ -308,36 +304,41 @@ if __name__ == "__main__":
     if args.shows:
         item_name='saved shows'
         db_table_name = f'{DB_TABLE_NAME_PREFIX}shows'
-        if args.ddb_get:
-            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
+        if args.postgres_get:
+            pass
+        elif args.mongodb_get:
+            pass
         else:
             items = paginate(method_name='current_user_saved_shows', item_name=item_name)
     if args.top_artists:
         item_name='top artists'
         db_table_name = f'{DB_TABLE_NAME_PREFIX}top_artists'
-        if args.ddb_get:
-            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
+        if args.postgres_get:
+            pass
+        elif args.mongodb_get:
+            pass
         else:
             items = paginate(method_name='current_user_top_artists', item_name=item_name)
     if args.top_tracks:
         item_name='top tracks'
         db_table_name = f'{DB_TABLE_NAME_PREFIX}top_tracks'
-        if args.ddb_get:
-            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
+        if args.postgres_get:
+            pass
+        elif args.mongodb_get:
+            pass
         else:
             items = paginate(method_name='current_user_top_tracks', item_name=item_name)
     if args.tracks:
         item_name = 'saved tracks'
         db_table_name=f'{DB_TABLE_NAME_PREFIX}tracks'
-        if args.ddb_get:
-            items = ddb_fetch(table_name=db_table_name, item_name=item_name)
+        if args.postgres_get:
+            pass
+        elif args.mongodb_get:
+            pass
         else:
             items = paginate(method_name='current_user_saved_tracks', item_name=item_name)
-    if args.db_backup or args.ddb_backup:
+    if args.postgres_backup or args.mongodb_backup:
         db_handle = None
-        if args.ddb_backup:
-            db_handle = boto3_ddb.Table(db_table_name)
-        #FIXME: ddb_item_count = ddb_count(table_name=db_table_name, item_name=item_name)
         item_count = len(items)
         if item_count > 0:
             if args.albums:
@@ -377,9 +378,12 @@ if __name__ == "__main__":
                 sub_item_name = 'track'
                 sub_item_key = 'id'
             log.info(f"Writing {item_count} {item_name} to DB table '{db_table_name}'...")
-            if args.db_backup:
+            if args.postgres_backup:
                 db_handle = pg_conn.cursor()
-                db_create_schema(c=db_handle, table_name=db_table_name, primary_key=pkey)
+                pg_create_schema(c=db_handle, table_name=db_table_name, primary_key=pkey)
+            elif args.mongodb_backup:
+                md_collection = md_conn[DB_NAME]
+                db_handle = md_collection[db_table_name]
             item = None
             pkey_value = None
             put_count = 0
@@ -398,17 +402,12 @@ if __name__ == "__main__":
                         log.warning(f'Skipping null values derived from {str(item)}')
                     continue
                 try:
-                    if args.db_backup:
+                    if args.postgres_backup:
                         db_handle.execute(
                             f"INSERT INTO {db_table_name} (spotify_{pkey}, spotify_json) VALUES (%s, %s) ON CONFLICT (spotify_{pkey}) DO NOTHING",
                             (pkey_value, json.dumps(item)))
-                    if args.ddb_backup:
-                        db_handle.put_item(
-                            Item={
-                                pkey: pkey_value,
-                                'info': item,
-                            },
-                        )
+                    elif args.mongodb_backup:
+                        db_handle.insert_one(item)
                     put_count += 1
                     if (put_count % 50 == 0):
                         log.info(f'Inserted {put_count} DB items so far...')
@@ -418,13 +417,14 @@ if __name__ == "__main__":
                     log_exception(e=e, item=item)
                     raise
             log.info(f"Added {put_count} (of {len(items)}) {item_name} to DB table '{db_table_name}'.")
-            if args.db_backup:
-                log.debug('Committing DB connection and closing cursor...')
+            if args.postgres_backup:
                 pg_conn.commit()
                 db_handle.close()
+            if args.mongodb_backup:
+                md_conn.close()
         else:
             log.warning(f'No {item_name} to add to DB.')
-    if not args.db_backup and not args.ddb_backup and items:
+    if not args.postgres_backup and not args.mongodb_backup and items:
         if len(items) > 0:
             try:
                 print(json.dumps(items))
@@ -435,6 +435,7 @@ if __name__ == "__main__":
             log.warning('No items for JSON.')
     if not items or (items and len(items) == 0):
         log.warning('Nothing fetched.')
-    log.info('Closing database connection...')
-    pg_conn.close()
+    if pg_conn:
+        log.info('Closing database connection...')
+        pg_conn.close()
     log.info('Goodbye.')
