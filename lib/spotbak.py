@@ -1,13 +1,12 @@
 import argparse
 from argparse import ArgumentParser
+import bitdotio
 import logging.handlers
-import os
 import os.path
 import sys
 
 import simplejson as json
 
-import boto3
 from boto3 import Session
 from botocore.session import Session as BotoCoreSession
 from botocore.exceptions import ClientError as bcce
@@ -35,6 +34,7 @@ from pymongo import MongoClient
 parser: ArgumentParser = argparse.ArgumentParser(description='Fetch Spotify content.')
 output_group = parser.add_mutually_exclusive_group(required=False)
 output_group.add_argument('--postgres-backup', action='store_true', help='Store result in Postgres database')
+output_group.add_argument('--bitdotio-backup', action='store_true', help='Store result in a Bit.io Postgres database')
 output_group.add_argument('--mongodb-backup', action='store_true', help='Store result in MongoDB')
 output_group.add_argument('--s3-backup', action='store_true', help='Store result in S3')
 output_group.add_argument('--postgres-get', action='store_true', help='Fetch previously stored result in Postgres database')
@@ -49,7 +49,7 @@ fetch_group.add_argument('--shows', action='store_true', help="| jq '[.[] | {nam
 fetch_group.add_argument('--top-artists', action='store_true', help="| jq '[.[] | {artist: .name, genre: .genres}]'")
 fetch_group.add_argument('--top-tracks', action='store_true', help="| jq '[.[] | {artist: .artists[0].name, album: .album.name, name: .name}]'")
 fetch_group.add_argument('--tracks', action='store_true', help="| jq '[.[] | {artist: .track.artists[0].name, album: .track.album.name, name: .track.name}]'")
-parser.add_argument('--no-filter-my-playlists', action='store_true', default=False, help='Fetch all playlist tracks.')
+parser.add_argument('--fetch-any-user-tracks', action='store_true', default=True, help='Fetch all playlist tracks, not just mine.')
 parser.add_argument('--debug', action='store_true', default=False, help='Use debug level logging.')
 args = parser.parse_args()
 
@@ -80,19 +80,21 @@ else:
 
 # credentials
 class CredsConfig:
-    sentry_dsn: f'opitem:"Sentry" opfield:{APP_NAME}.dsn' = None # type: ignore
-    aws_akid: f'opitem:"AWS" opfield:.username' = None # type: ignore
-    aws_sak: f'opitem:"AWS" opfield:.password' = None # type: ignore
-    spotify_username: f'opitem:"Spotify" opfield:.username' = None # type: ignore
-    spotify_client_id: f'opitem:"Spotify" opfield:dev.id' = None # type: ignore
-    spotify_client_secret: f'opitem:"Spotify" opfield:dev.secret' = None # type: ignore
-    spotify_client_uri: f'opitem:"Spotify" opfield:dev.uri' = None # type: ignore
-    postgres_ip: f'opitem:"Postgres" opfield:DB.IP' = None # type: ignore
-    postgres_user: f'opitem:"Postgres" opfield:.username' = None # type: ignore
-    postgres_password: f'opitem:"Postgres" opfield:.password' = None # type: ignore
-    mongodb_ip: f'opitem:"MongoDB" opfield:DB.IP' = None # type: ignore
-    mongodb_user: f'opitem:"MongoDB" opfield:.username' = None # type: ignore
-    mongodb_password: f'opitem:"MongoDB" opfield:.password' = None # type: ignore
+    sentry_dsn: f'opitem:"Sentry" opfield:{APP_NAME}.dsn' = None  # type: ignore
+    aws_akid: f'opitem:"AWS" opfield:.username' = None  # type: ignore
+    aws_sak: f'opitem:"AWS" opfield:.password' = None  # type: ignore
+    bitdotio_api_key: f'opitem:"bitdotio" opfield:DB1.api_key' = None  # type: ignore
+    bitdotio_db_name: f'opitem:"bitdotio" opfield:DB1.name' = None  # type: ignore
+    spotify_username: f'opitem:"Spotify" opfield:.username' = None  # type: ignore
+    spotify_client_id: f'opitem:"Spotify" opfield:dev.id' = None  # type: ignore
+    spotify_client_secret: f'opitem:"Spotify" opfield:dev.secret' = None  # type: ignore
+    spotify_client_uri: f'opitem:"Spotify" opfield:dev.uri' = None  # type: ignore
+    postgres_ip: f'opitem:"Postgres" opfield:DB.IP' = None  # type: ignore
+    postgres_user: f'opitem:"Postgres" opfield:.username' = None  # type: ignore
+    postgres_password: f'opitem:"Postgres" opfield:.password' = None  # type: ignore
+    mongodb_ip: f'opitem:"MongoDB" opfield:DB.IP' = None  # type: ignore
+    mongodb_user: f'opitem:"MongoDB" opfield:.username' = None  # type: ignore
+    mongodb_password: f'opitem:"MongoDB" opfield:.password' = None  # type: ignore
 
 
 # test required variables
@@ -147,6 +149,11 @@ if args.postgres_backup or args.postgres_get:
         database=DB_NAME,
         user=creds.postgres_user,
         password=creds.postgres_password)
+
+if args.bitdotio_backup:
+    log.debug(f'Opening connection to Bit.io for Postgres backup.')
+    b = bitdotio.bitdotio(creds.bitdotio_api_key)
+    pg_conn = b.get_connection(db_name=creds.bitdotio_db_name)
 
 md_conn = None
 if args.mongodb_backup or args.mongodb_get:
@@ -299,7 +306,7 @@ if __name__ == "__main__":
             user_id = sp.me()['id']
             playlists = paginate(method_name='current_user_playlists', item_name=item_name)
             for playlist in playlists:
-                if playlist['owner']['id'] == user_id or args.no_filter_my_playlists:
+                if playlist['owner']['id'] == user_id or args.fetch_any_user_tracks:
                     items.append(playlist)
     if args.playlists_tracks:
         item_name = 'playlists tracks'
@@ -314,7 +321,7 @@ if __name__ == "__main__":
             user_id = sp.me()['id']
             playlists = paginate(method_name='current_user_playlists', item_name=item_name)
             for playlist in playlists:
-                if playlist['owner']['id'] == user_id or args.no_filter_my_playlists:
+                if playlist['owner']['id'] == user_id or args.fetch_any_user_tracks:
                     playlist_count += 1
                     log.info(f'Collecting playlist data for user {user_id}...')
                     playlist_id = playlist['id']
@@ -359,7 +366,7 @@ if __name__ == "__main__":
             items = md_get(db_name=DB_NAME, collection_name=db_table_name)
         else:
             items = paginate(method_name='current_user_saved_tracks', item_name=item_name)
-    if args.postgres_backup or args.mongodb_backup:
+    if args.postgres_backup or args.bitdotio_backup or args.mongodb_backup:
         item_count = len(items)
         if item_count > 0:
             db_handle = None
@@ -400,7 +407,7 @@ if __name__ == "__main__":
                 sub_item_name = 'track'
                 sub_item_key = 'id'
             log.info(f"Writing {item_count} {item_name} to DB table '{db_table_name}'...")
-            if args.postgres_backup:
+            if args.postgres_backup or args.bitdotio_backup:
                 db_handle = pg_conn.cursor()
                 pg_create_schema(c=db_handle, table_name=db_table_name, primary_key=pkey)
             elif args.mongodb_backup:
@@ -424,7 +431,7 @@ if __name__ == "__main__":
                         log.warning(f'Skipping null values derived from {str(item)}')
                     continue
                 try:
-                    if args.postgres_backup:
+                    if args.postgres_backup or args.bitdotio_backup:
                         db_handle.execute(
                             f"INSERT INTO {db_table_name} (spotify_{pkey}, spotify_json) VALUES (%s, %s) ON CONFLICT (spotify_{pkey}) DO NOTHING",
                             (pkey_value, json.dumps(item)))
@@ -439,14 +446,14 @@ if __name__ == "__main__":
                     log_exception(e=e, item=item)
                     raise
             log.info(f"Added {put_count} (of {len(items)}) {item_name} to DB table '{db_table_name}'.")
-            if args.postgres_backup:
+            if args.postgres_backup or args.bitdotio_backup:
                 pg_conn.commit()
                 db_handle.close()
             if args.mongodb_backup:
                 md_conn.close()
         else:
             log.warning(f'No {item_name} to add to DB.')
-    if not args.postgres_backup and not args.mongodb_backup and items:
+    if not args.postgres_backup and not args.bitdotio_backup and not args.mongodb_backup and items:
         if len(items) > 0:
             try:
                 print(json.dumps(items))
