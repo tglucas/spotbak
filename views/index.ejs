@@ -1,0 +1,89 @@
+<div class="container mt-4">
+    <div class="row">
+        <div class="col-12">
+            <div class="jumbotron bg-gradient text-white p-5 rounded mb-4" style="background: linear-gradient(135deg, #1db954, #1ed760);">
+                <h1 class="display-4"><i class="fas fa-music me-3"></i>Spotbak Viewer</h1>
+                <p class="lead">View and explore your Spotify backup data</p>
+                <hr class="my-4" style="border-color: rgba(255,255,255,0.3);">
+                <p>Browse through your saved data with a beautiful web interface. Found <%= Object.keys(datasets).length %> datasets with <%= totalItems.toLocaleString() %> total items.</p>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4 mb-5">
+        <% Object.entries(datasets).forEach(([key, info]) => { %>
+            <div class="col-md-6 col-lg-4 col-xl-3">
+                <div class="card stats-card h-100">
+                    <div class="card-body text-center">
+                        <% 
+                        let icon = 'fas fa-database';
+                        if (info.type === 'artists') icon = 'fas fa-user-music';
+                        else if (info.type === 'tracks') icon = 'fas fa-music';
+                        else if (info.type === 'playlists') icon = 'fas fa-list';
+                        else if (info.type === 'albums') icon = 'fas fa-compact-disc';
+                        else if (info.type === 'shows') icon = 'fas fa-podcast';
+                        %>
+                        <i class="<%= icon %> fa-3x mb-3"></i>
+                        <h3 class="card-title"><%= info.count.toLocaleString() %></h3>
+                        <p class="card-text"><%= info.displayName %></p>
+                        <small class="text-light opacity-75 d-block mb-3">
+                            <%= info.filename %>
+                        </small>
+                        <a href="/dataset/<%= key %>" class="btn btn-light btn-sm">
+                            View <%= info.displayName %>
+                        </a>
+                    </div>
+                </div>
+            </div>
+        <% }); %>
+    </div>
+
+    <% if (Object.keys(datasets).length === 0) { %>
+        <div class="row">
+            <div class="col-12">
+                <div class="alert alert-warning text-center">
+                    <i class="fas fa-exclamation-triangle fa-2x mb-3"></i>
+                    <h4>No Spotbak Data Found</h4>
+                    <p>No JSON files starting with "spotbak" were found in the current directory.</p>
+                    <p>Make sure your backup files are in the same directory as this application.</p>
+                </div>
+            </div>
+        </div>
+    <% } else { %>
+        <div class="row">
+            <div class="col-12">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="card-title mb-0"><i class="fas fa-info-circle me-2"></i>About Spotbak Viewer</h5>
+                    </div>
+                    <div class="card-body">
+                        <p class="card-text">
+                            This web interface automatically discovers and displays all your Spotify backup data files. 
+                            Your data is loaded locally and displayed with rich formatting, including images, popularity metrics, 
+                            and searchable content.
+                        </p>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <h6><i class="fas fa-check-circle text-success me-2"></i>Features:</h6>
+                                <ul class="list-unstyled">
+                                    <li><i class="fas fa-search me-2"></i>Search and filter functionality</li>
+                                    <li><i class="fas fa-images me-2"></i>Automatic image display</li>
+                                    <li><i class="fas fa-chart-bar me-2"></i>Popularity and metrics</li>
+                                    <li><i class="fas fa-magic me-2"></i>Auto-discovery of data files</li>
+                                </ul>
+                            </div>
+                            <div class="col-md-6">
+                                <h6><i class="fas fa-database text-info me-2"></i>Discovered Files:</h6>
+                                <ul class="list-unstyled">
+                                    <% Object.values(datasets).forEach(info => { %>
+                                        <li><i class="fas fa-file-code me-2"></i><%= info.filename %></li>
+                                    <% }); %>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    <% } %>
+</div>

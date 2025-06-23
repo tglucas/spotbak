@@ -1,0 +1,374 @@
+<div class="search-container">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <h2 class="text-white text-center mb-4">
+                    <% 
+                    let icon = 'fas fa-database';
+                    if (info.type === 'artists') icon = 'fas fa-user-music';
+                    else if (info.type === 'tracks') icon = 'fas fa-music';
+                    else if (info.type === 'playlists') icon = 'fas fa-list';
+                    else if (info.type === 'albums') icon = 'fas fa-compact-disc';
+                    else if (info.type === 'shows') icon = 'fas fa-podcast';
+                    %>
+                    <i class="<%= icon %> me-2"></i><%= info.displayName %>
+                </h2>
+                <% if (info.searchFields.length > 0) { %>
+                <form method="GET" action="/dataset/<%= datasetName %>">
+                    <div class="input-group input-group-lg">
+                        <input type="text" class="form-control" name="search" 
+                               placeholder="Search <%= info.searchFields.join(', ') %>..." 
+                               value="<%= search %>">
+                        <button class="btn btn-light" type="submit">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </form>
+                <% } %>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <p class="text-muted">
+                <% if (Array.isArray(data) && data.length > 0) { %>
+                    Showing <%= ((currentPage - 1) * limit) + 1 %>-<%= Math.min(currentPage * limit, totalItems) %> 
+                    of <%= totalItems.toLocaleString() %> items
+                <% } else { %>
+                    <%= totalItems.toLocaleString() %> items found
+                <% } %>
+            </p>
+        </div>
+        <div class="col-md-6 text-end">
+            <% if (totalItems > limit) { %>
+            <div class="btn-group" role="group">
+                <% 
+                const limits = info.type === 'tracks' ? [25, 50, 100] : 
+                              info.type === 'artists' ? [10, 20, 50] : 
+                              [12, 24, 48];
+                %>
+                <% limits.forEach(l => { %>
+                    <a href="?page=<%= currentPage %>&limit=<%= l %>&search=<%= search %>" 
+                       class="btn btn-outline-secondary <%= limit == l ? 'active' : '' %>"><%= l %></a>
+                <% }); %>
+            </div>
+            <% } %>
+        </div>
+    </div>
+
+    <% if (data.length === 0) { %>
+        <div class="text-center py-5">
+            <i class="<%= icon %> fa-4x text-muted mb-3"></i>
+            <h4 class="text-muted">No <%= info.displayName.toLowerCase() %> found</h4>
+            <% if (search) { %>
+                <p class="text-muted">No results found for "<%= search %>". <a href="/dataset/<%= datasetName %>">Clear search</a></p>
+            <% } else { %>
+                <p class="text-muted">The <%= info.filename %> file appears to be empty or has an unexpected format.</p>
+            <% } %>
+        </div>
+    <% } else if (info.type === 'playlists' || info.type === 'albums' || info.type === 'shows') { %>
+        <!-- Card/Grid Layout for playlists, albums, shows -->
+        <div class="row">
+            <% data.forEach(item => { 
+                // Handle different data structures
+                let itemData;
+                if (info.type === 'albums' && item.album) {
+                    itemData = item.album; // Albums are nested under 'album' key
+                } else if (info.type === 'shows' && item.show) {
+                    itemData = item.show; // Shows are nested under 'show' key
+                } else if (info.type === 'tracks' && item.track) {
+                    itemData = item.track; // Some tracks are nested under 'track' key
+                } else {
+                    itemData = item.spotify_json || item; // Default handling
+                }
+            %>
+                <div class="col-md-6 col-lg-4 col-xl-3 mb-4">
+                    <div class="card h-100">
+                        <% if (itemData.images && itemData.images.length > 0) { %>
+                            <img src="<%= itemData.images[0].url %>" 
+                                 class="card-img-top" 
+                                 alt="<%= itemData.name || 'Item' %>"
+                                 style="height: 200px; object-fit: cover;"
+                                 onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                            <div class="card-img-top bg-secondary d-none align-items-center justify-content-center" 
+                                 style="height: 200px;">
+                                <i class="<%= icon %> fa-3x text-white"></i>
+                            </div>
+                        <% } else { %>
+                            <div class="card-img-top bg-secondary d-flex align-items-center justify-content-center" 
+                                 style="height: 200px;">
+                                <i class="<%= icon %> fa-3x text-white"></i>
+                            </div>
+                        <% } %>
+                        <div class="card-body">
+                            <h6 class="card-title"><%= itemData.name || 'Unnamed Item' %></h6>
+                            <% if (itemData.description) { %>
+                                <p class="card-text text-muted small">
+                                    <%= itemData.description.substring(0, 100) %><%= itemData.description.length > 100 ? '...' : '' %>
+                                </p>
+                            <% } %>
+                            <% if (itemData.artists && itemData.artists[0]) { %>
+                                <p class="card-text text-muted small">
+                                    <i class="fas fa-user me-1"></i><%= itemData.artists[0].name %>
+                                </p>
+                            <% } %>
+                            <% if (itemData.owner) { %>
+                                <p class="card-text text-muted small">
+                                    <i class="fas fa-user me-1"></i>by <%= itemData.owner.display_name || itemData.owner.id %>
+                                </p>
+                            <% } %>
+                            <% if (itemData.publisher) { %>
+                                <p class="card-text text-muted small">
+                                    <i class="fas fa-building me-1"></i><%= itemData.publisher %>
+                                </p>
+                            <% } %>
+                            <div class="d-flex justify-content-between align-items-center">
+                                <% if (itemData.tracks && itemData.tracks.total !== undefined) { %>
+                                    <small class="text-muted">
+                                        <i class="fas fa-music me-1"></i><%= itemData.tracks.total %> tracks
+                                    </small>
+                                <% } else if (itemData.total_tracks) { %>
+                                    <small class="text-muted">
+                                        <i class="fas fa-music me-1"></i><%= itemData.total_tracks %> tracks
+                                    </small>
+                                <% } else if (itemData.total_episodes) { %>
+                                    <small class="text-muted">
+                                        <i class="fas fa-podcast me-1"></i><%= itemData.total_episodes %> episodes
+                                    </small>
+                                <% } %>
+                                <% if (itemData.followers && itemData.followers.total) { %>
+                                    <small class="text-muted">
+                                        <i class="fas fa-users me-1"></i><%= itemData.followers.total.toLocaleString() %>
+                                    </small>
+                                <% } %>
+                                <% if (itemData.release_date) { %>
+                                    <small class="text-muted">
+                                        <i class="fas fa-calendar me-1"></i><%= new Date(itemData.release_date).getFullYear() %>
+                                    </small>
+                                <% } %>
+                            </div>
+                            <% if (itemData.album_type) { %>
+                                <span class="badge bg-info mt-2">
+                                    <%= itemData.album_type.charAt(0).toUpperCase() + itemData.album_type.slice(1) %>
+                                </span>
+                            <% } %>
+                            <% if (itemData.media_type) { %>
+                                <span class="badge bg-info mt-2">
+                                    <%= itemData.media_type.charAt(0).toUpperCase() + itemData.media_type.slice(1) %>
+                                </span>
+                            <% } %>
+                            <% if (itemData.explicit) { %>
+                                <span class="badge bg-warning text-dark mt-2">Explicit</span>
+                            <% } %>
+                        </div>
+                        <div class="card-footer bg-transparent">
+                            <% if (itemData.external_urls && itemData.external_urls.spotify) { %>
+                                <a href="<%= itemData.external_urls.spotify %>" 
+                                   target="_blank" 
+                                   class="btn btn-success btn-sm w-100">
+                                    <i class="fab fa-spotify me-1"></i>Open in Spotify
+                                </a>
+                            <% } %>
+                        </div>
+                    </div>
+                </div>
+            <% }); %>
+        </div>
+    <% } else { %>
+        <!-- Table Layout for artists, tracks, and other data -->
+        <div class="table-responsive">
+            <table class="table table-hover bg-white">
+                <thead class="table-dark">
+                    <tr>
+                        <% if (info.hasImages) { %><th>Image</th><% } %>
+                        <th>Name</th>
+                        <% if (info.type === 'artists') { %>
+                            <th>Followers</th>
+                            <th>Popularity</th>
+                            <th>Genres</th>
+                        <% } else if (info.type === 'tracks') { %>
+                            <th>Artist</th>
+                            <th>Album</th>
+                            <th>Duration</th>
+                            <th>Popularity</th>
+                        <% } else { %>
+                            <th>Type</th>
+                            <th>Details</th>
+                        <% } %>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <% data.forEach(item => { 
+                        // Handle different data structures properly
+                        let itemData, trackData, albumData, artistData;
+                        
+                        if (info.type === 'albums' && item.album) {
+                            itemData = item.album;
+                            trackData = itemData;
+                            albumData = itemData;
+                            artistData = itemData.artists ? itemData.artists[0] : {};
+                        } else if (info.type === 'shows' && item.show) {
+                            itemData = item.show;
+                            trackData = itemData;
+                            albumData = {};
+                            artistData = {};
+                        } else if (info.type === 'tracks') {
+                            itemData = item.spotify_json || item;
+                            trackData = itemData.track || itemData;
+                            albumData = trackData.album || {};
+                            artistData = trackData.artists ? trackData.artists[0] : (itemData.artists ? itemData.artists[0] : {});
+                        } else {
+                            itemData = item.spotify_json || item;
+                            trackData = itemData.track || itemData;
+                            albumData = trackData.album || {};
+                            artistData = trackData.artists ? trackData.artists[0] : (itemData.artists ? itemData.artists[0] : {});
+                        }
+                    %>
+                    <tr>
+                        <% if (info.hasImages) { %>
+                        <td>
+                            <% 
+                            let imageUrl = '';
+                            if (itemData.images && itemData.images.length > 0) {
+                                imageUrl = itemData.images[itemData.images.length - 1].url;
+                            } else if (albumData.images && albumData.images.length > 0) {
+                                imageUrl = albumData.images[albumData.images.length - 1].url;
+                            }
+                            %>
+                            <% if (imageUrl) { %>
+                                <img src="<%= imageUrl %>" 
+                                     alt="<%= itemData.name || trackData.name || 'Item' %>" 
+                                     class="<%= info.type === 'artists' ? 'artist-image' : 'track-image' %>"
+                                     onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                <div class="<%= info.type === 'artists' ? 'artist-image' : 'track-image' %> bg-secondary d-none align-items-center justify-content-center">
+                                    <i class="fas fa-user text-white"></i>
+                                </div>
+                            <% } else { %>
+                                <div class="<%= info.type === 'artists' ? 'artist-image' : 'track-image' %> bg-secondary d-flex align-items-center justify-content-center">
+                                    <i class="fas fa-user text-white"></i>
+                                </div>
+                            <% } %>
+                        </td>
+                        <% } %>
+                        <td>
+                            <strong><%= itemData.name || trackData.name || 'Unknown' %></strong>
+                            <% if (trackData.explicit || itemData.explicit) { %>
+                                <span class="badge bg-warning text-dark ms-1">E</span>
+                            <% } %>
+                        </td>
+                        <% if (info.type === 'artists') { %>
+                            <td>
+                                <span class="badge bg-info">
+                                    <i class="fas fa-users me-1"></i><%= (itemData.followers && itemData.followers.total || 0).toLocaleString() %>
+                                </span>
+                            </td>
+                            <td>
+                                <% if (itemData.popularity !== undefined) { %>
+                                    <div class="d-flex align-items-center">
+                                        <div class="progress me-2" style="width: 60px; height: 8px;">
+                                            <div class="progress-bar popularity-bar" 
+                                                 style="width: <%= itemData.popularity %>%"></div>
+                                        </div>
+                                        <small><%= itemData.popularity %></small>
+                                    </div>
+                                <% } else { %>
+                                    -
+                                <% } %>
+                            </td>
+                            <td>
+                                <% if (itemData.genres && itemData.genres.length > 0) { %>
+                                    <% itemData.genres.slice(0, 3).forEach(genre => { %>
+                                        <span class="badge bg-secondary genre-badge"><%= genre %></span>
+                                    <% }); %>
+                                    <% if (itemData.genres.length > 3) { %>
+                                        <span class="badge bg-light text-dark genre-badge">+<%= itemData.genres.length - 3 %></span>
+                                    <% } %>
+                                <% } %>
+                            </td>
+                        <% } else if (info.type === 'tracks') { %>
+                            <td><%= artistData.name || 'Unknown Artist' %></td>
+                            <td><%= albumData.name || 'Unknown Album' %></td>
+                            <td>
+                                <% if (trackData.duration_ms) { %>
+                                    <% const minutes = Math.floor(trackData.duration_ms / 60000); %>
+                                    <% const seconds = Math.floor((trackData.duration_ms % 60000) / 1000); %>
+                                    <%= minutes %>:<%= seconds.toString().padStart(2, '0') %>
+                                <% } else { %>
+                                    -
+                                <% } %>
+                            </td>
+                            <td>
+                                <% if (trackData.popularity !== undefined) { %>
+                                    <div class="d-flex align-items-center">
+                                        <div class="progress me-2" style="width: 60px; height: 8px;">
+                                            <div class="progress-bar popularity-bar" 
+                                                 style="width: <%= trackData.popularity %>%"></div>
+                                        </div>
+                                        <small><%= trackData.popularity %></small>
+                                    </div>
+                                <% } else { %>
+                                    -
+                                <% } %>
+                            </td>
+                        <% } else { %>
+                            <td>
+                                <%= itemData.type || itemData.album_type || itemData.media_type || 'Unknown' %>
+                                <% if (itemData.publisher) { %>
+                                    <br><small class="text-muted">by <%= itemData.publisher %></small>
+                                <% } %>
+                            </td>
+                            <td>
+                                <% if (itemData.description) { %>
+                                    <%= itemData.description.substring(0, 80) %><%= itemData.description.length > 80 ? '...' : '' %>
+                                <% } else if (artistData.name) { %>
+                                    by <%= artistData.name %>
+                                <% } else if (itemData.total_episodes) { %>
+                                    <%= itemData.total_episodes %> episodes
+                                <% } else { %>
+                                    -
+                                <% } %>
+                            </td>
+                        <% } %>
+                        <td>
+                            <% const externalUrl = itemData.external_urls?.spotify || trackData.external_urls?.spotify; %>
+                            <% if (externalUrl) { %>
+                                <a href="<%= externalUrl %>" 
+                                   target="_blank" 
+                                   class="btn btn-success btn-sm">
+                                    <i class="fab fa-spotify me-1"></i>Open
+                                </a>
+                            <% } %>
+                        </td>
+                    </tr>
+                    <% }); %>
+                </tbody>
+            </table>
+        </div>
+    <% } %>
+
+    <!-- Pagination -->
+    <% if (totalItems > limit && Math.ceil(totalItems / limit) > 1) { %>
+    <nav aria-label="<%= info.displayName %> pagination">
+        <ul class="pagination justify-content-center">
+            <li class="page-item <%= currentPage === 1 ? 'disabled' : '' %>">
+                <a class="page-link" href="?page=<%= currentPage - 1 %>&limit=<%= limit %>&search=<%= search %>">Previous</a>
+            </li>
+            
+            <% const totalPages = Math.ceil(totalItems / limit); %>
+            <% for (let i = Math.max(1, currentPage - 2); i <= Math.min(totalPages, currentPage + 2); i++) { %>
+                <li class="page-item <%= i === currentPage ? 'active' : '' %>">
+                    <a class="page-link" href="?page=<%= i %>&limit=<%= limit %>&search=<%= search %>"><%= i %></a>
+                </li>
+            <% } %>
+            
+            <li class="page-item <%= currentPage === totalPages ? 'disabled' : '' %>">
+                <a class="page-link" href="?page=<%= currentPage + 1 %>&limit=<%= limit %>&search=<%= search %>">Next</a>
+            </li>
+        </ul>
+    </nav>
+    <% } %>
+</div>

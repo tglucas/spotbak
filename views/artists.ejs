@@ -1,0 +1,121 @@
+<div class="search-container">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <h2 class="text-white text-center mb-4"><i class="fas fa-user-music me-2"></i>Artists</h2>
+                <form method="GET" action="/artists">
+                    <div class="input-group input-group-lg">
+                        <input type="text" class="form-control" name="search" placeholder="Search artists or genres..." value="<%= search %>">
+                        <button class="btn btn-light" type="submit">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <p class="text-muted">
+                Showing <%= ((currentPage - 1) * limit) + 1 %>-<%= Math.min(currentPage * limit, totalArtists) %> 
+                of <%= totalArtists.toLocaleString() %> artists
+            </p>
+        </div>
+        <div class="col-md-6 text-end">
+            <div class="btn-group" role="group">
+                <a href="?page=<%= currentPage %>&limit=10&search=<%= search %>" class="btn btn-outline-secondary <%= limit == 10 ? 'active' : '' %>">10</a>
+                <a href="?page=<%= currentPage %>&limit=20&search=<%= search %>" class="btn btn-outline-secondary <%= limit == 20 ? 'active' : '' %>">20</a>
+                <a href="?page=<%= currentPage %>&limit=50&search=<%= search %>" class="btn btn-outline-secondary <%= limit == 50 ? 'active' : '' %>">50</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-hover bg-white">
+            <thead class="table-dark">
+                <tr>
+                    <th>Image</th>
+                    <th>Artist</th>
+                    <th>Followers</th>
+                    <th>Popularity</th>
+                    <th>Genres</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% artists.forEach(artist => { %>
+                <tr>
+                    <td>
+                        <% if (artist.images && artist.images.length > 0) { %>
+                            <img src="<%= artist.images[artist.images.length - 1].url %>" 
+                                 alt="<%= artist.name %>" 
+                                 class="artist-image"
+                                 onerror="this.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNjAiIGhlaWdodD0iNjAiIHZpZXdCb3g9IjAgMCA2MCA2MCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGNpcmNsZSBjeD0iMzAiIGN5PSIzMCIgcj0iMzAiIGZpbGw9IiNlZWVlZWUiLz4KPHN2ZyB3aWR0aD0iMjQiIGhlaWdodD0iMjQiIHZpZXdCb3g9IjAgMCAyNCAyNCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIiB4PSIxOCIgeT0iMTgiPgo8cGF0aCBkPSJNMTIgMTJDMTQuMjA5MSAxMiAxNiAxMC4yMDkxIDE2IDhDMTYgNS43OTA5IDE0LjIwOTEgNCA1IDRDOS43OTA5IDQgOCA1Ljc5MDkgOCA4QzggMTAuMjA5MSA5Ljc5MDkgMTIgMTIgMTJaIiBmaWxsPSIjOTk5OTk5Ii8+CjxwYXRoIGQ9Ik0xMiAxNEM5LjMzIDEzIDcgMTUuMzMgNyAxOFYyMEgxN1YxOEMxNyAxNS4zMyAxNC42NyAxMyAxMiAxM1oiIGZpbGw9IiM5OTk5OTkiLz4KPC9zdmc+Cjwvc3ZnPgo='">
+                        <% } else { %>
+                            <div class="artist-image bg-secondary d-flex align-items-center justify-content-center">
+                                <i class="fas fa-user text-white"></i>
+                            </div>
+                        <% } %>
+                    </td>
+                    <td>
+                        <strong><%= artist.name %></strong>
+                    </td>
+                    <td>
+                        <span class="badge bg-info">
+                            <i class="fas fa-users me-1"></i><%= artist.followers.total.toLocaleString() %>
+                        </span>
+                    </td>
+                    <td>
+                        <div class="d-flex align-items-center">
+                            <div class="progress me-2" style="width: 60px; height: 8px;">
+                                <div class="progress-bar popularity-bar" 
+                                     style="width: <%= artist.popularity %>%"></div>
+                            </div>
+                            <small><%= artist.popularity %></small>
+                        </div>
+                    </td>
+                    <td>
+                        <% artist.genres.slice(0, 3).forEach(genre => { %>
+                            <span class="badge bg-secondary genre-badge"><%= genre %></span>
+                        <% }); %>
+                        <% if (artist.genres.length > 3) { %>
+                            <span class="badge bg-light text-dark genre-badge">+<%= artist.genres.length - 3 %></span>
+                        <% } %>
+                    </td>
+                    <td>
+                        <a href="<%= artist.external_urls.spotify %>" 
+                           target="_blank" 
+                           class="btn btn-success btn-sm">
+                            <i class="fab fa-spotify me-1"></i>Open
+                        </a>
+                    </td>
+                </tr>
+                <% }); %>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <% if (totalPages > 1) { %>
+    <nav aria-label="Artists pagination">
+        <ul class="pagination justify-content-center">
+            <li class="page-item <%= currentPage === 1 ? 'disabled' : '' %>">
+                <a class="page-link" href="?page=<%= currentPage - 1 %>&limit=<%= limit %>&search=<%= search %>">Previous</a>
+            </li>
+            
+            <% for (let i = Math.max(1, currentPage - 2); i <= Math.min(totalPages, currentPage + 2); i++) { %>
+                <li class="page-item <%= i === currentPage ? 'active' : '' %>">
+                    <a class="page-link" href="?page=<%= i %>&limit=<%= limit %>&search=<%= search %>"><%= i %></a>
+                </li>
+            <% } %>
+            
+            <li class="page-item <%= currentPage === totalPages ? 'disabled' : '' %>">
+                <a class="page-link" href="?page=<%= currentPage + 1 %>&limit=<%= limit %>&search=<%= search %>">Next</a>
+            </li>
+        </ul>
+    </nav>
+    <% } %>
+</div>

@@ -1,0 +1,132 @@
+<div class="search-container">
+    <div class="container">
+        <div class="row justify-content-center">
+            <div class="col-md-8">
+                <h2 class="text-white text-center mb-4"><i class="fas fa-music me-2"></i>Tracks</h2>
+                <form method="GET" action="/tracks">
+                    <div class="input-group input-group-lg">
+                        <input type="text" class="form-control" name="search" placeholder="Search tracks or artists..." value="<%= search %>">
+                        <button class="btn btn-light" type="submit">
+                            <i class="fas fa-search"></i>
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="container">
+    <div class="row mb-3">
+        <div class="col-md-6">
+            <p class="text-muted">
+                Showing <%= ((currentPage - 1) * limit) + 1 %>-<%= Math.min(currentPage * limit, totalTracks) %> 
+                of <%= totalTracks.toLocaleString() %> tracks
+            </p>
+        </div>
+        <div class="col-md-6 text-end">
+            <div class="btn-group" role="group">
+                <a href="?page=<%= currentPage %>&limit=25&search=<%= search %>" class="btn btn-outline-secondary <%= limit == 25 ? 'active' : '' %>">25</a>
+                <a href="?page=<%= currentPage %>&limit=50&search=<%= search %>" class="btn btn-outline-secondary <%= limit == 50 ? 'active' : '' %>">50</a>
+                <a href="?page=<%= currentPage %>&limit=100&search=<%= search %>" class="btn btn-outline-secondary <%= limit == 100 ? 'active' : '' %>">100</a>
+            </div>
+        </div>
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-hover bg-white">
+            <thead class="table-dark">
+                <tr>
+                    <th>Cover</th>
+                    <th>Track</th>
+                    <th>Artist</th>
+                    <th>Album</th>
+                    <th>Duration</th>
+                    <th>Popularity</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                <% tracks.forEach(track => { 
+                    const trackData = track.spotify_json?.track || track.spotify_json || {};
+                    const albumData = trackData.album || {};
+                    const artistData = trackData.artists?.[0] || {};
+                %>
+                <tr>
+                    <td>
+                        <% if (albumData.images && albumData.images.length > 0) { %>
+                            <img src="<%= albumData.images[albumData.images.length - 1].url %>" 
+                                 alt="<%= albumData.name || 'Album cover' %>" 
+                                 class="track-image">
+                        <% } else { %>
+                            <div class="track-image bg-secondary d-flex align-items-center justify-content-center">
+                                <i class="fas fa-music text-white"></i>
+                            </div>
+                        <% } %>
+                    </td>
+                    <td>
+                        <strong><%= trackData.name || 'Unknown Track' %></strong>
+                        <% if (trackData.explicit) { %>
+                            <span class="badge bg-warning text-dark ms-1">E</span>
+                        <% } %>
+                    </td>
+                    <td><%= artistData.name || 'Unknown Artist' %></td>
+                    <td><%= albumData.name || 'Unknown Album' %></td>
+                    <td>
+                        <% if (trackData.duration_ms) { %>
+                            <% const minutes = Math.floor(trackData.duration_ms / 60000); %>
+                            <% const seconds = Math.floor((trackData.duration_ms % 60000) / 1000); %>
+                            <%= minutes %>:<%= seconds.toString().padStart(2, '0') %>
+                        <% } else { %>
+                            -
+                        <% } %>
+                    </td>
+                    <td>
+                        <% if (trackData.popularity !== undefined) { %>
+                            <div class="d-flex align-items-center">
+                                <div class="progress me-2" style="width: 60px; height: 8px;">
+                                    <div class="progress-bar popularity-bar" 
+                                         style="width: <%= trackData.popularity %>%"></div>
+                                </div>
+                                <small><%= trackData.popularity %></small>
+                            </div>
+                        <% } else { %>
+                            -
+                        <% } %>
+                    </td>
+                    <td>
+                        <% if (trackData.external_urls?.spotify) { %>
+                            <a href="<%= trackData.external_urls.spotify %>" 
+                               target="_blank" 
+                               class="btn btn-success btn-sm">
+                                <i class="fab fa-spotify me-1"></i>Open
+                            </a>
+                        <% } %>
+                    </td>
+                </tr>
+                <% }); %>
+            </tbody>
+        </table>
+    </div>
+
+    <!-- Pagination -->
+    <% if (totalPages > 1) { %>
+    <nav aria-label="Tracks pagination">
+        <ul class="pagination justify-content-center">
+            <li class="page-item <%= currentPage === 1 ? 'disabled' : '' %>">
+                <a class="page-link" href="?page=<%= currentPage - 1 %>&limit=<%= limit %>&search=<%= search %>">Previous</a>
+            </li>
+            
+            <% for (let i = Math.max(1, currentPage - 2); i <= Math.min(totalPages, currentPage + 2); i++) { %>
+                <li class="page-item <%= i === currentPage ? 'active' : '' %>">
+                    <a class="page-link" href="?page=<%= i %>&limit=<%= limit %>&search=<%= search %>"><%= i %></a>
+                </li>
+            <% } %>
+            
+            <li class="page-item <%= currentPage === totalPages ? 'disabled' : '' %>">
+                <a class="page-link" href="?page=<%= currentPage + 1 %>&limit=<%= limit %>&search=<%= search %>">Next</a>
+            </li>
+        </ul>
+    </nav>
+    <% } %>
+</div>

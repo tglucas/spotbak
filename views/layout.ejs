@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title || 'Spotbak Viewer' %></title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css" rel="stylesheet">
+    <link href="/style.css" rel="stylesheet">
+    <style>
+        .artist-image {
+            width: 60px;
+            height: 60px;
+            object-fit: cover;
+            border-radius: 50%;
+        }
+        .track-image {
+            width: 50px;
+            height: 50px;
+            object-fit: cover;
+            border-radius: 4px;
+        }
+        .genre-badge {
+            font-size: 0.75rem;
+            margin: 2px;
+        }
+        .popularity-bar {
+            height: 20px;
+            background: linear-gradient(90deg, #1db954 0%, #1ed760 100%);
+            border-radius: 10px;
+        }
+        .navbar-brand {
+            font-weight: bold;
+        }
+        .table-responsive {
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 0 20px rgba(0,0,0,0.1);
+        }
+        .search-container {
+            background: linear-gradient(135deg, #1db954, #1ed760);
+            padding: 2rem 0;
+            margin-bottom: 2rem;
+        }
+        .stats-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 15px;
+        }
+        .dropdown-menu {
+            max-height: 400px;
+            overflow-y: auto;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <nav class="navbar navbar-expand-lg navbar-dark bg-dark">
+        <div class="container">
+            <a class="navbar-brand" href="/">
+                <i class="fas fa-music me-2"></i>Spotbak Viewer
+            </a>
+            <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav">
+                <span class="navbar-toggler-icon"></span>
+            </button>
+            <div class="collapse navbar-collapse" id="navbarNav">
+                <ul class="navbar-nav ms-auto">
+                    <li class="nav-item">
+                        <a class="nav-link" href="/"><i class="fas fa-home me-1"></i>Dashboard</a>
+                    </li>
+                    <% if (typeof datasets !== 'undefined' && Object.keys(datasets).length > 0) { %>
+                        <li class="nav-item dropdown">
+                            <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                                <i class="fas fa-database me-1"></i>Datasets
+                            </a>
+                            <ul class="dropdown-menu">
+                                <% Object.entries(datasets).forEach(([key, info]) => { %>
+                                    <li>
+                                        <a class="dropdown-item" href="/dataset/<%= key %>">
+                                            <% 
+                                            let icon = 'fas fa-database';
+                                            if (info.type === 'artists') icon = 'fas fa-user-music';
+                                            else if (info.type === 'tracks') icon = 'fas fa-music';
+                                            else if (info.type === 'playlists') icon = 'fas fa-list';
+                                            else if (info.type === 'albums') icon = 'fas fa-compact-disc';
+                                            else if (info.type === 'shows') icon = 'fas fa-podcast';
+                                            %>
+                                            <i class="<%= icon %> me-2"></i>
+                                            <%= info.displayName %>
+                                            <span class="badge bg-secondary ms-2"><%= info.count.toLocaleString() %></span>
+                                        </a>
+                                    </li>
+                                <% }); %>
+                            </ul>
+                        </li>
+                    <% } %>
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown">
+                            <i class="fas fa-code me-1"></i>API
+                        </a>
+                        <ul class="dropdown-menu">
+                            <li><a class="dropdown-item" href="/api/datasets"><i class="fas fa-info me-2"></i>Dataset Info</a></li>
+                            <li><hr class="dropdown-divider"></li>
+                            <% if (typeof datasets !== 'undefined') { %>
+                                <% Object.entries(datasets).forEach(([key, info]) => { %>
+                                    <li><a class="dropdown-item" href="/api/dataset/<%= key %>"><i class="fas fa-download me-2"></i><%= info.displayName %> JSON</a></li>
+                                <% }); %>
+                            <% } %>
+                        </ul>
+                    </li>
+                </ul>
+            </div>
+        </div>
+    </nav>
+
+    <main>
+        <%- body %>
+    </main>
+
+    <footer class="bg-dark text-light py-4 mt-5">
+        <div class="container text-center">
+            <p class="mb-0">&copy; 2024 Spotbak Viewer - Spotify Backup Tool</p>
+        </div>
+    </footer>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
