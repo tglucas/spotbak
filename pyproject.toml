@@ -1,0 +1,19 @@
+[tool.poetry]
+package-mode = false
+description = "Spotify meta-data backup tool."
+authors = ["Tai Lucas <tglucas@gmail.com>"]
+license = "MIT"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = "^3.11"
+pymongo = "^4.13.2"
+boto3 = "^1.38.41"
+onepasswordconnectsdk = "^1.5.1"
+psycopg2-binary = "^2.9.10"
+sentry-sdk = "^2.30.0"
+spotipy = "^2.25.1"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

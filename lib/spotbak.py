@@ -1,11 +1,12 @@
 import argparse
 from argparse import ArgumentParser
-import bitdotio
-import logging.handlers
-import os.path
-import sys
 
-import simplejson as json
+from bson.json_util import dumps, loads
+from bson.objectid import ObjectId
+
+import logging.handlers
+import os
+import sys
 
 from boto3 import Session
 from botocore.session import Session as BotoCoreSession
@@ -29,16 +30,18 @@ import psycopg2
 from psycopg2.errors import DatabaseError as dboops
 
 from pymongo import MongoClient
-
+from pymongo.errors import WriteError, DuplicateKeyError
+from pymongo.results import InsertOneResult
 
 parser: ArgumentParser = argparse.ArgumentParser(description='Fetch Spotify content.')
-output_group = parser.add_mutually_exclusive_group(required=False)
-output_group.add_argument('--postgres-backup', action='store_true', help='Store result in Postgres database')
-output_group.add_argument('--bitdotio-backup', action='store_true', help='Store result in a Bit.io Postgres database')
-output_group.add_argument('--mongodb-backup', action='store_true', help='Store result in MongoDB')
-output_group.add_argument('--s3-backup', action='store_true', help='Store result in S3')
-output_group.add_argument('--postgres-get', action='store_true', help='Fetch previously stored result in Postgres database')
-output_group.add_argument('--mongodb-get', action='store_true', help='Fetch previously stored result in MongoDB')
+load_group = parser.add_mutually_exclusive_group(required=False)
+load_group.add_argument('--json-get', action='store_true', default=False, help='Load data from JSON file instead of fetching it from Spotify.')
+load_group.add_argument('--postgres-get', action='store_true', help='Fetch previously stored result in Postgres database')
+load_group.add_argument('--mongodb-get', action='store_true', help='Fetch previously stored result in MongoDB')
+store_group = parser.add_mutually_exclusive_group(required=False)
+store_group.add_argument('--postgres-backup', action='store_true', help='Store result in Postgres database')
+store_group.add_argument('--mongodb-backup', action='store_true', help='Store result in MongoDB')
+store_group.add_argument('--s3-backup', action='store_true', help='Store result in S3')
 fetch_group = parser.add_mutually_exclusive_group(required=True)
 fetch_group.add_argument('--albums', action='store_true', help="| jq '[.[] | {artist: .name, genre: .genres}]'")
 fetch_group.add_argument('--artists', action='store_true', help="| jq '[.[] | {artist: .album.artists[0].name, album: .album.name, track: [{name: .album.tracks.items[].name, track_number: .album.tracks.items[].track_number}]}]'")
@@ -67,11 +70,6 @@ if sys.stdout.isatty():
     stream_handler.setFormatter(formatter)
     log.addHandler(stream_handler)
 
-#TODO: detect syslog
-#syslog_handler = logging.handlers.SysLogHandler(address='/dev/log')
-#syslog_handler.setFormatter(formatter)
-#log.addHandler(syslog_handler)
-
 if args.debug:
     log.setLevel(logging.DEBUG)
 else:
@@ -83,8 +81,6 @@ class CredsConfig:
     sentry_dsn: f'opitem:"Sentry" opfield:{APP_NAME}.dsn' = None  # type: ignore
     aws_akid: f'opitem:"AWS" opfield:.username' = None  # type: ignore
     aws_sak: f'opitem:"AWS" opfield:.password' = None  # type: ignore
-    bitdotio_api_key: f'opitem:"bitdotio" opfield:DB1.api_key' = None  # type: ignore
-    bitdotio_db_name: f'opitem:"bitdotio" opfield:DB1.name' = None  # type: ignore
     spotify_username: f'opitem:"Spotify" opfield:.username' = None  # type: ignore
     spotify_client_id: f'opitem:"Spotify" opfield:dev.id' = None  # type: ignore
     spotify_client_secret: f'opitem:"Spotify" opfield:dev.secret' = None  # type: ignore
@@ -92,14 +88,14 @@ class CredsConfig:
     postgres_ip: f'opitem:"Postgres" opfield:DB.IP' = None  # type: ignore
     postgres_user: f'opitem:"Postgres" opfield:.username' = None  # type: ignore
     postgres_password: f'opitem:"Postgres" opfield:.password' = None  # type: ignore
-    mongodb_ip: f'opitem:"MongoDB" opfield:DB.IP' = None  # type: ignore
-    mongodb_user: f'opitem:"MongoDB" opfield:.username' = None  # type: ignore
-    mongodb_password: f'opitem:"MongoDB" opfield:.password' = None  # type: ignore
+    mongodb_ip: f'opitem:"MongoDB" opfield:{APP_NAME}.IP' = None  # type: ignore
+    mongodb_user: f'opitem:"MongoDB" opfield:{APP_NAME}.username' = None  # type: ignore
+    mongodb_password: f'opitem:"MongoDB" opfield:{APP_NAME}.password' = None  # type: ignore
 
 
 # test required variables
 try:
-    op_connect_server = os.environ['OP_CONNECT_SERVER']
+    op_connect_server = os.environ['OP_CONNECT_HOST']
 except KeyError:
     default_op_connect_server = 'http://localhost:8080'
     log.debug(f'Environment variable OP_CONNECT_SERVER not specified, using [{default_op_connect_server}].')
@@ -121,26 +117,27 @@ sentry_sdk.init(dsn=creds.sentry_dsn)
 
 
 # AWS
-try:
-    os.environ['AWS_ACCESS_KEY_ID']
-    os.environ['AWS_SECRET_ACCESS_KEY']
-except KeyError:
-    os.environ['AWS_ACCESS_KEY_ID'] = creds.aws_akid
-    os.environ['AWS_SECRET_ACCESS_KEY'] = creds.aws_sak
+if args.s3_backup:
+    try:
+        os.environ['AWS_ACCESS_KEY_ID']
+        os.environ['AWS_SECRET_ACCESS_KEY']
+    except KeyError:
+        os.environ['AWS_ACCESS_KEY_ID'] = creds.aws_akid
+        os.environ['AWS_SECRET_ACCESS_KEY'] = creds.aws_sak
 
+    boto_session = BotoCoreSession()
+    boto3_session = Session(
+        aws_access_key_id=creds.aws_akid,
+        aws_secret_access_key=creds.aws_sak,
+        region_name=AWS_REGION,
+        botocore_session=boto_session)
 
-boto_session = BotoCoreSession()
-boto3_session = Session(
-    aws_access_key_id=creds.aws_akid,
-    aws_secret_access_key=creds.aws_sak,
-    region_name=AWS_REGION,
-    botocore_session=boto_session)
+    # TODO: S3
 
-# TODO: S3
-
-DB_NAME = 'spotbak'
+DB_NAME = APP_NAME
 DB_TABLE_NAME_PREFIX = f'{DB_NAME}_'
 
+# Postgres
 pg_conn = None
 if args.postgres_backup or args.postgres_get:
     log.debug(f'Opening Postgres DB connection {creds.postgres_user}@{creds.postgres_ip}/{DB_NAME}...')
@@ -150,28 +147,26 @@ if args.postgres_backup or args.postgres_get:
         user=creds.postgres_user,
         password=creds.postgres_password)
 
-if args.bitdotio_backup:
-    log.debug(f'Opening connection to Bit.io for Postgres backup.')
-    b = bitdotio.bitdotio(creds.bitdotio_api_key)
-    pg_conn = b.get_connection(db_name=creds.bitdotio_db_name)
-
+# MongoDB
 md_conn = None
 if args.mongodb_backup or args.mongodb_get:
     log.debug(f'Opening MongoDB connection {creds.mongodb_user}@{creds.mongodb_ip}/{DB_NAME}...')
     db_url = creds.mongodb_ip.replace('__USER__', creds.mongodb_user).replace('__PASSWORD__', creds.mongodb_password)
     md_conn = MongoClient(db_url)
 
-os.environ['SPOTIPY_CLIENT_ID'] = creds.spotify_client_id
-os.environ['SPOTIPY_CLIENT_SECRET'] = creds.spotify_client_secret
-auth_manager = SpotifyClientCredentials()
-sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=creds.spotify_client_id,
-                                               client_secret=creds.spotify_client_secret,
-                                               redirect_uri=creds.spotify_client_uri,
-                                               scope=[
-                                                   "user-library-read",
-                                                   "playlist-read-private",
-                                                   "user-top-read",
-                                                   "user-follow-read"]))
+# Spotify
+if not args.json_get and not args.postgres_get and not args.mongodb_get:
+    os.environ['SPOTIPY_CLIENT_ID'] = creds.spotify_client_id
+    os.environ['SPOTIPY_CLIENT_SECRET'] = creds.spotify_client_secret
+    auth_manager = SpotifyClientCredentials()
+    sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id=creds.spotify_client_id,
+                                                client_secret=creds.spotify_client_secret,
+                                                redirect_uri=creds.spotify_client_uri,
+                                                scope=[
+                                                    "user-library-read",
+                                                    "playlist-read-private",
+                                                    "user-top-read",
+                                                    "user-follow-read"]))
 
 
 def paginate(method_name, item_name, use_cursor=False, item_key=None, **kwargs):
@@ -249,16 +244,17 @@ def log_exception(e, item):
         error_code = e.__class__.__name__
     structured_data = None
     try:
-        structured_data = json.dumps(item)
+        structured_data = dumps(item)
     except TypeError:
         structured_data = str(item)
-    log.warning(f'{error_code} during put of {pkey_value}: {structured_data}', exc_info=True)
+    log.fatal(f'{error_code} during put of {pkey_value}: {structured_data}', exc_info=True)
 
 
 if __name__ == "__main__":
-    items = None
+    items = []
     db_table_name = None
     item_name = None
+    item_index = None
     if args.albums:
         item_name='saved albums'
         db_table_name = f'{DB_TABLE_NAME_PREFIX}albums'
@@ -266,14 +262,10 @@ if __name__ == "__main__":
             pass
         elif args.mongodb_get:
             projection = {}
-            #projection["album.name"] = 1.0
-            #projection["album.artists.name"] = {
-            #    u"$slice": 1.0
-            #}
-            #projection["album.release_date"] = 1.0
             sort = []
-            #sort = [ (u"album.release_date", 1) ]
             items = md_get(db_name=DB_NAME, collection_name=db_table_name, projection=projection, sort=sort)
+        elif args.json_get:
+            items = loads(Path(f'{db_table_name}.json').read_text())
         else:
             items = paginate(method_name='current_user_saved_albums', item_name=item_name)
     if args.artists:
@@ -283,6 +275,8 @@ if __name__ == "__main__":
             pass
         elif args.mongodb_get:
             items = md_get(db_name=DB_NAME, collection_name=db_table_name)
+        elif args.json_get:
+            items = loads(Path(f'{db_table_name}.json').read_text())
         else:
             items = paginate(method_name='current_user_followed_artists', item_name=item_name, use_cursor=True, item_key='artists')
     if args.episodes:
@@ -292,6 +286,8 @@ if __name__ == "__main__":
             pass
         elif args.mongodb_get:
             items = md_get(db_name=DB_NAME, collection_name=db_table_name)
+        elif args.json_get:
+            items = loads(Path(f'{db_table_name}.json').read_text())
         else:
             items = paginate(method_name='current_user_saved_episodes', item_name=item_name)
     if args.playlists:
@@ -301,6 +297,8 @@ if __name__ == "__main__":
             pass
         elif args.mongodb_get:
             items = md_get(db_name=DB_NAME, collection_name=db_table_name)
+        elif args.json_get:
+            items = loads(Path(f'{db_table_name}.json').read_text())
         else:
             items = list()
             user_id = sp.me()['id']
@@ -315,6 +313,8 @@ if __name__ == "__main__":
             pass
         elif args.mongodb_get:
             items = md_get(db_name=DB_NAME, collection_name=db_table_name)
+        elif args.json_get:
+            items = loads(Path(f'{db_table_name}.json').read_text())
         else:
             items = list()
             playlist_count = 0
@@ -337,6 +337,8 @@ if __name__ == "__main__":
             pass
         elif args.mongodb_get:
             items = md_get(db_name=DB_NAME, collection_name=db_table_name)
+        elif args.json_get:
+            items = loads(Path(f'{db_table_name}.json').read_text())
         else:
             items = paginate(method_name='current_user_saved_shows', item_name=item_name)
     if args.top_artists:
@@ -346,6 +348,8 @@ if __name__ == "__main__":
             pass
         elif args.mongodb_get:
             items = md_get(db_name=DB_NAME, collection_name=db_table_name)
+        elif args.json_get:
+            items = loads(Path(f'{db_table_name}.json').read_text())
         else:
             items = paginate(method_name='current_user_top_artists', item_name=item_name)
     if args.top_tracks:
@@ -355,6 +359,8 @@ if __name__ == "__main__":
             pass
         elif args.mongodb_get:
             items = md_get(db_name=DB_NAME, collection_name=db_table_name)
+        elif args.json_get:
+            items = loads(Path(f'{db_table_name}.json').read_text())
         else:
             items = paginate(method_name='current_user_top_tracks', item_name=item_name)
     if args.tracks:
@@ -364,9 +370,12 @@ if __name__ == "__main__":
             pass
         elif args.mongodb_get:
             items = md_get(db_name=DB_NAME, collection_name=db_table_name)
+        elif args.json_get:
+            items = loads(Path(f'{db_table_name}.json').read_text())
         else:
             items = paginate(method_name='current_user_saved_tracks', item_name=item_name)
-    if args.postgres_backup or args.bitdotio_backup or args.mongodb_backup:
+    log.info(f'Loaded {len(items)} {item_name} from selected source.')
+    if args.postgres_backup or args.mongodb_backup:
         item_count = len(items)
         if item_count > 0:
             db_handle = None
@@ -407,7 +416,7 @@ if __name__ == "__main__":
                 sub_item_name = 'track'
                 sub_item_key = 'id'
             log.info(f"Writing {item_count} {item_name} to DB table '{db_table_name}'...")
-            if args.postgres_backup or args.bitdotio_backup:
+            if args.postgres_backup:
                 db_handle = pg_conn.cursor()
                 pg_create_schema(c=db_handle, table_name=db_table_name, primary_key=pkey)
             elif args.mongodb_backup:
@@ -416,54 +425,66 @@ if __name__ == "__main__":
             item = None
             pkey_value = None
             put_count = 0
+            dupes_skipped = 0
+            junk_skipped = 0
             for item in items:
-                if sub_item_name:
-                    sub_item = item[sub_item_name]
-                else:
-                    sub_item = item
-                if sub_item is None or item is None:
-                    if item:
-                        log.warning(f'Skipping null values derived from {str(item)}')
-                    continue
-                pkey_value = sub_item[sub_item_key]
-                if pkey_value is None:
-                    if item:
-                        log.warning(f'Skipping null values derived from {str(item)}')
-                    continue
                 try:
-                    if args.postgres_backup or args.bitdotio_backup:
+                    # look first for nested primary key
+                    if sub_item_name in item.keys():
+                        sub_item = item[sub_item_name]
+                        if sub_item is None:
+                            log.warning(f'Skipping null sub-item {sub_item_name} in {str(item)}')
+                            junk_skipped += 1
+                            continue
+                        pkey_value = sub_item[sub_item_key]
+                        if pkey_value is None:
+                            log.warning(f'Skipping null sub-item primary key ({sub_item_name}.{sub_item_key}) value in {str(item)}')
+                            junk_skipped += 1
+                            continue
+                    else:
+                        # default primary key value
+                        pkey_value = item[sub_item_key]
+                    if args.postgres_backup:
                         db_handle.execute(
                             f"INSERT INTO {db_table_name} (spotify_{pkey}, spotify_json) VALUES (%s, %s) ON CONFLICT (spotify_{pkey}) DO NOTHING",
-                            (pkey_value, json.dumps(item)))
+                            (pkey_value, dumps(item)))
                     elif args.mongodb_backup:
-                        db_handle.insert_one(item)
-                    put_count += 1
-                    if (put_count % 50 == 0):
-                        log.info(f'Inserted {put_count} DB items so far...')
+                        try:
+                            ir: InsertOneResult = db_handle.insert_one(item)
+                            put_count += 1
+                            if item_index is None:
+                                if sub_item_name:
+                                    item_index = f"{sub_item_name}.{sub_item_key}"
+                                else:
+                                    item_index = sub_item_key
+                                log.info(f"Creating unique index on {item_index} field in MongoDB collection '{db_table_name}'...")
+                                db_handle.create_index([(item_index, 1)], unique=True)
+                        except DuplicateKeyError:
+                            dupes_skipped += 1
+                    if ((put_count+dupes_skipped) % 50 == 0):
+                        log.info(f'Inserted {put_count} DB items so far ({dupes_skipped} duplicates skipped)...')
                 except bcce as e:
                     log_exception(e=e, item=item)
                 except (KeyError, TypeError, dboops) as e: # type: ignore
                     log_exception(e=e, item=item)
                     raise
-            log.info(f"Added {put_count} (of {len(items)}) {item_name} to DB table '{db_table_name}'.")
-            if args.postgres_backup or args.bitdotio_backup:
+            log.info(f"Added {put_count} (of {len(items)}) {item_name} to DB table '{db_table_name}' ({dupes_skipped} duplicates skipped, {junk_skipped} invalid skipped).")
+            if args.postgres_backup:
                 pg_conn.commit()
                 db_handle.close()
             if args.mongodb_backup:
                 md_conn.close()
         else:
             log.warning(f'No {item_name} to add to DB.')
-    if not args.postgres_backup and not args.bitdotio_backup and not args.mongodb_backup and items:
-        if len(items) > 0:
-            try:
-                print(json.dumps(items))
-            except TypeError:
-                log.exception(f'Cannot JSON dump {str(items)}')
-                raise
-        else:
-            log.warning('No items for JSON.')
     if not items or (items and len(items) == 0):
         log.warning('Nothing fetched.')
+    elif not args.json_get:
+        json_data = dumps(items, indent=2, sort_keys=True)
+        if db_table_name is not None:
+            json_file_name = f'{db_table_name}.json'
+            log.info(f'Writing JSON data to {json_file_name}')
+            with open(json_file_name, 'w') as f:
+                f.write(json_data)
     if pg_conn:
         log.info('Closing database connection...')
         pg_conn.close()
