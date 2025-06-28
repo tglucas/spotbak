@@ -1,9 +1,23 @@
 # spotbak
-Spotify Backup Tool
+Spotify Metadata Backup Tool
 
-## Notes
+## Spotify Account
 
 - In order for the Spotify OAuth workflow to complete, ensure that `Redirect URIs` on the Spotify developer profile for your application include all forms of your callback, including URIs that reference local/private addresses.
+
+## CLI tool
+
+This project can be loaded as a [VS Code workspace](https://code.visualstudio.com/docs/editor/workspaces) or on the command-line using a [dev container](https://containers.dev/).
+
+1. **Build the devcontainer and connect to it using your favourite shell**:
+   ```bash
+   devcontainer up --workspace-folder .
+   devcontainer exec --workspace-folder . /bin/bash
+   ```
+2. **Run the spotbak CLI, specifying the necessary arguments**:
+   ```bash
+   poetry run python ./lib/spotbak.py
+   ```
 
 ## Web Viewer
 
